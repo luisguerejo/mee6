@@ -1,9 +1,12 @@
 use std::env;
 
-use serenity::all::GatewayIntents;
+use songbird::SerenityInit;
+use songbird::events::{Event, EventHandler as VoiceEventHandler, TrackEvent, EventContext};
+use serenity::all::{GatewayIntents};
 use serenity::async_trait;
 use serenity::model::channel::Message;
 use serenity::prelude::*;
+use serenity::client::Context;
 
 struct Handler;
 
@@ -23,6 +26,41 @@ impl EventHandler for Handler {
                     eprintln!("Error msg: {:?}", result.unwrap());
                 }
             },
+            "!join" => {
+                msg.react(&ctx.http, '👀').await;
+                let (guild_id, channel_id) = {
+                    let guild = msg.guild(&ctx.cache).unwrap();
+                    let channel_id = guild
+                        .voice_states
+                        .get(&msg.author.id)
+                        .and_then(|voice_state| voice_state.channel_id);
+
+                    (guild.id, channel_id)
+                };
+                println!("Guild ID: {:?}\n Channel ID: {:?}", guild_id, channel_id);
+
+                let connect = match channel_id {
+                    Some(channel) => channel,
+                    None => {
+                        panic!("Could not match channel_id!");
+                    }
+                };
+
+                let manager = songbird::get(&ctx)
+                    .await
+                    .expect("Songbird Voice client placed")
+                    .clone();
+
+
+
+
+                match  manager.join(guild_id, connect).await {
+                    Ok(_) => {
+                        println!("Succesfully connected!");
+                    },
+                    Err(e) => panic!("Could not join: {:?}", e)
+                }
+            },
             _ => ()
         }
     }
@@ -40,8 +78,10 @@ async fn main() {
         | GatewayIntents::GUILD_MESSAGE_REACTIONS
         | GatewayIntents::MESSAGE_CONTENT;
 
-    let mut client = Client::builder(&token, intents).event_handler(Handler).await.expect("Error creating client");
+    let mut client = Client::builder(&token, intents)
+        .event_handler(Handler)
+        .register_songbird()
+        .await.expect("Error creating client");
 
     client.start().await;
-
 }
