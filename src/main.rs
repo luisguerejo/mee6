@@ -1,20 +1,22 @@
 use std::env;
 
-use serenity::all::GatewayIntents;
-use serenity::async_trait;
-use serenity::client::Context;
+use serenity::prelude::GatewayIntents;
+use serenity::prelude::Client;
+use serenity::prelude::Context;
 use serenity::model::channel::Message;
-use serenity::prelude::*;
+use poise::serenity_prelude as serenity;
 use songbird::SerenityInit;
+use std::collections::vec_deque::VecDeque;
 
-use poise::serenity_prelude;
-type Error = &'static str;
-type BotFramework<'a> = poise::Framework<Context, Error>;
-struct Handler;
-struct General;
+mod youtube;
+type Error = Box<dyn std::error::Error + Send + Sync>;
+type BotContext<'a> = poise::Context<'a, VecDeque<youtube::SongMessage>, Error>;
 
-async fn ping(_ctx: Context, _msg: Message) -> Result<(), SerenityError> {
+#[poise::command(prefix_command)]
+async fn ping(ctx: BotContext<'_>) -> Result<(), Error>{
+    ctx.say("Pong!").await?;
     Ok(())
+
 }
 
 #[tokio::main]
@@ -29,15 +31,9 @@ async fn main() {
         | GatewayIntents::GUILD_MESSAGE_REACTIONS
         | GatewayIntents::MESSAGE_CONTENT;
 
-    let framework = poise::Framework::builder()
-        .setup(|ctx: &'_ Context, _, framework: &BotFramework| {
-            Box::pin(async move {
-                ctx.set_presence(None, serenity::model::user::OnlineStatus::Idle);
-                let commands = poise::builtins::create_application_commands(&framework.options().commands);
-                Ok(ctx)
-            })
-        })
+    let framework = poise::Framework::<VecDeque<youtube::SongMessage>, Error>::builder()
         .options(poise::FrameworkOptions {
+            commands: vec![ping()],
             skip_checks_for_owners: true,
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
@@ -47,8 +43,15 @@ async fn main() {
                 ..Default::default()
             },
             ..Default::default()
+        }).setup(move |ctx, _ready, framework| {
+            Box::pin(async move {
+                ctx.set_presence(None, serenity::model::user::OnlineStatus::Idle);
+                let commands = poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                Ok(VecDeque::<youtube::SongMessage>::new())
+            })
         })
         .build();
+
     let mut client = Client::builder(&token, intents)
         .framework(framework)
         .register_songbird()
