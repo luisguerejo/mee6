@@ -8,64 +8,12 @@ use serenity::prelude::*;
 use songbird::SerenityInit;
 
 use poise::serenity_prelude;
-type FrameworkContext<'a> = poise::Framework<(), SerenityError>;
+type Error = &'static str;
+type BotFramework<'a> = poise::Framework<Context, Error>;
 struct Handler;
 struct General;
 
-#[async_trait]
-impl EventHandler for Handler {
-    async fn message(&self, ctx: Context, msg: Message) {
-        match msg.content.as_str() {
-            "!ping" => {
-                msg.react(&ctx.http, '👀').await;
-                msg.channel_id.say(&ctx.http, "Pong!").await;
-            }
-            "!deleteme" => {
-                eprintln!("Got a delete me");
-                let result = msg.delete(&ctx.http).await;
-                if result.is_err() {
-                    eprintln!("Error deleting message");
-                    eprintln!("Error msg: {:?}", result.unwrap());
-                }
-            }
-            "!join" => {
-                msg.react(&ctx.http, '👀').await;
-                let (guild_id, channel_id) = {
-                    let guild = msg.guild(&ctx.cache).unwrap();
-                    let channel_id = guild
-                        .voice_states
-                        .get(&msg.author.id)
-                        .and_then(|voice_state| voice_state.channel_id);
-
-                    (guild.id, channel_id)
-                };
-                println!("Guild ID: {:?}\n Channel ID: {:?}", guild_id, channel_id);
-
-                let connect = match channel_id {
-                    Some(channel) => channel,
-                    None => {
-                        panic!("Could not match channel_id!");
-                    }
-                };
-
-                let manager = songbird::get(&ctx)
-                    .await
-                    .expect("Songbird Voice client placed")
-                    .clone();
-
-                match manager.join(guild_id, connect).await {
-                    Ok(_) => {
-                        println!("Succesfully connected!");
-                    }
-                    Err(e) => panic!("Could not join: {:?}", e),
-                }
-            }
-            _ => (),
-        }
-    }
-}
-
-async fn ping(ctx: Context, msg: Message) -> Result<(), SerenityError> {
+async fn ping(_ctx: Context, _msg: Message) -> Result<(), SerenityError> {
     Ok(())
 }
 
@@ -82,7 +30,13 @@ async fn main() {
         | GatewayIntents::MESSAGE_CONTENT;
 
     let framework = poise::Framework::builder()
-        .setup(|_ctx, _ready, _: &FrameworkContext| Box::pin(async move { Ok(()) }))
+        .setup(|ctx: &'_ Context, _, framework: &BotFramework| {
+            Box::pin(async move {
+                ctx.set_presence(None, serenity::model::user::OnlineStatus::Idle);
+                let commands = poise::builtins::create_application_commands(&framework.options().commands);
+                Ok(ctx)
+            })
+        })
         .options(poise::FrameworkOptions {
             skip_checks_for_owners: true,
             prefix_options: poise::PrefixFrameworkOptions {
@@ -96,7 +50,7 @@ async fn main() {
         })
         .build();
     let mut client = Client::builder(&token, intents)
-        .event_handler(Handler)
+        .framework(framework)
         .register_songbird()
         .await
         .expect("Error creating client");
