@@ -10,6 +10,7 @@ use youtube::SongMessage;
 use std::collections::vec_deque::VecDeque;
 use regex::Regex;
 use reqwest::Client as HttpClient;
+use tokio::sync::mpsc;
 
 mod youtube;
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -19,7 +20,8 @@ type BotContext<'a> = poise::Context<'a, Bot, Error>;
 struct Bot{
     httpClient: HttpClient,
     youtubeRegex: Regex,
-    songQueue: VecDeque<SongMessage>
+    sender: mpsc::Sender<SongMessage>,
+    recvr: mpsc::Receiver<SongMessage>
 }
 
 #[poise::command(
@@ -50,11 +52,9 @@ async fn join(
         (guild.id, channel_id)
     };
 
-    let connect = match channel_id {
-        Some(channel) => channel,
-        None => {
-            panic!("Could not match channel_id!")
-        }
+    if let None = channel_id {
+        ctx.say("You're not in a channel!").await;
+        return Ok(())
     };
 
     let manager = songbird::get(&ctx.serenity_context())
@@ -62,8 +62,12 @@ async fn join(
         .expect("Songbird voice client err")
         .clone();
 
-    match manager.join(guild_id, connect).await {
-        Ok(_) => {
+    match manager.join(guild_id, channel_id.unwrap()).await {
+        Ok(manager) => {
+            let mut manager_lock = manager.lock().await;
+            if let Err(why) = manager_lock.deafen(true).await{
+                eprintln!("Could not deafen when joining: {:?}", why);
+            }
             let activity = ActivityData::custom("Bumping tunes");
             ctx.serenity_context().set_presence(Some(activity), Online);
             Ok(())
@@ -83,8 +87,10 @@ async fn play(ctx: BotContext<'_>, #[rest] song: String) -> Result<(), Error>{
         true => {
             let author = ctx.author().id;
             let song = YoutubeDl::new(get_http_client(&ctx).await, song);
-            let guild = ctx.guild().unwrap();
             let msg = SongMessage{link: song, from: author};
+            if let Err(why) = ctx.data().sender.send(msg).await{
+                panic!("Could not send song to other thread: {:?}", why);
+            }
         
         },
         false => {
@@ -116,6 +122,17 @@ async fn main() {
         | GatewayIntents::GUILD_MESSAGE_REACTIONS
         | GatewayIntents::MESSAGE_CONTENT;
 
+    // Channels to communicate between threads
+    // Consumer thread -> Queue up songs for the voice client thread.
+    // Producer threads -> Command handling threads (Sent in a song request)
+    let (send, mut rcv) = mpsc::channel(25);
+    let data = Bot{
+        httpClient: HttpClient::new(),
+        youtubeRegex: Regex::new(r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$").expect("error creating regex"),
+        sender: send,
+        recvr: rcv
+    };
+
     let framework = poise::Framework::<Bot, Error>::builder()
         .options(poise::FrameworkOptions {
             commands: vec![
@@ -133,28 +150,22 @@ async fn main() {
                 ..Default::default()
             },
             ..Default::default()
-        }).setup(move |ctx, _ready, framework| {
+        })
+        .setup(move |ctx, _ready, framework| {
             Box::pin(async move {
+                // Initial activity for the bot and register the commands
                 let activity = ActivityData::custom("Mimis");
                 ctx.set_presence(Some(activity), Idle);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(Bot{
-                    httpClient: HttpClient::new(),
-                    youtubeRegex: Regex::new(r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$").expect("error creating regex"),
-                    songQueue: VecDeque::new()
-                })
+                Ok(data)
             })
         })
         .build();
+        
 
     let mut client = Client::builder(&token, intents)
         .framework(framework)
         .register_songbird()
-        .type_map_insert::<Bot>(Bot{
-                    httpClient: HttpClient::new(),
-                    youtubeRegex: Regex::new(r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$").expect("error creating regex"),
-                    songQueue: VecDeque::new()
-            })
         .await
         .expect("Error creating client");
 
