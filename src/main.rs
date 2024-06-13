@@ -1,16 +1,16 @@
 use std::env;
 use serenity::{
-    prelude::{GatewayIntents, Client, TypeMapKey},
+    gateway::ActivityData,
     model::user::OnlineStatus::{Idle, Online},
-    gateway::ActivityData
+    prelude::{Client, GatewayIntents, TypeMapKey}
 };
 use songbird::input::YoutubeDl;
 use songbird::SerenityInit;
 use youtube::SongMessage;
-use std::collections::vec_deque::VecDeque;
 use regex::Regex;
 use reqwest::Client as HttpClient;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 mod youtube;
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -36,6 +36,38 @@ async fn ping(ctx: BotContext<'_>) -> Result<(), Error>{
 
 impl TypeMapKey for Bot{
     type Value = Bot;
+}
+
+async fn driver(mut rx: oneshot::Receiver<SongMessage>) -> Result<(), Error>{
+
+    loop{
+        match rx.try_recv(){
+        Ok(song) => println!("Got a song!: {:?}", song),
+        Err(oneshot::error::TryRecvError::Empty) => continue,
+        Err(oneshot::error::TryRecvError::Closed) => {break;}
+       }
+    }
+
+    Ok(())
+}
+
+
+async fn consumer(mut recvr: mpsc::Receiver<SongMessage>) -> Result<(), Error>{
+
+    let (mut tx, rx) = oneshot::channel();
+
+    let driver = tokio::spawn(async move {
+        driver(rx)
+    });
+
+    while(!recvr.is_empty() && !recvr.is_closed()){
+        let song = recvr.recv().await;
+    }
+
+    tx.closed().await;
+
+
+    Ok(())
 }
 
 #[poise::command(prefix_command)]
@@ -70,6 +102,10 @@ async fn join(
             }
             let activity = ActivityData::custom("Bumping tunes");
             ctx.serenity_context().set_presence(Some(activity), Online);
+            // let recvr = ctx.data().recvr;
+            // tokio::spawn(async move {
+            //     consumer(recvr);
+            // });
             Ok(())
         },
         Err(e) => panic!("Could not join: {:?}", e)
@@ -109,7 +145,7 @@ async fn get_http_client(ctx: &BotContext<'_>) -> reqwest::Client{
     ctx.data().httpClient.clone()
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     println!("Starting application");
 
