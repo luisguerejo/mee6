@@ -1,11 +1,9 @@
 use std::env;
-
-use serenity::all::CacheHttp;
-use serenity::all::Http;
-use serenity::prelude::GatewayIntents;
-use serenity::prelude::Client;
-use serenity::model::user::OnlineStatus::{Idle, Online};
-use serenity::gateway::ActivityData;
+use serenity::{
+    prelude::{GatewayIntents, Client, TypeMapKey},
+    model::user::OnlineStatus::{Idle, Online},
+    gateway::ActivityData
+};
 use songbird::input::YoutubeDl;
 use songbird::SerenityInit;
 use youtube::SongMessage;
@@ -17,10 +15,11 @@ mod youtube;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type BotContext<'a> = poise::Context<'a, Bot, Error>;
 
+#[allow(non_snake_case)]
 struct Bot{
-    pub httpClient: HttpClient,
+    httpClient: HttpClient,
     youtubeRegex: Regex,
-    songQueue: VecDeque<youtube::SongMessage>
+    songQueue: VecDeque<SongMessage>
 }
 
 #[poise::command(
@@ -31,6 +30,10 @@ struct Bot{
 async fn ping(ctx: BotContext<'_>) -> Result<(), Error>{
     ctx.say("Pong!").await?;
     Ok(())
+}
+
+impl TypeMapKey for Bot{
+    type Value = Bot;
 }
 
 #[poise::command(prefix_command)]
@@ -73,11 +76,16 @@ async fn join(
     prefix_command,
     aliases("p", "queue", "q")
 )]
-async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>{
-    let regex = Regex::new(r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$")?;
-    match regex.is_match(&arg){
+async fn play(ctx: BotContext<'_>, #[rest] song: String) -> Result<(), Error>{
+    // Queue's up songs to be played
+    // TODO if bot hasn't joined, join channel
+    match get_regex(&ctx).await.is_match(&song){
         true => {
-            ctx.say("Got a link!").await?;
+            let author = ctx.author().id;
+            let song = YoutubeDl::new(get_http_client(&ctx).await, song);
+            let guild = ctx.guild().unwrap();
+            let msg = SongMessage{link: song, from: author};
+        
         },
         false => {
             ctx.say("Did not get a link!").await?;
@@ -87,12 +95,21 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>{
     Ok(())
 }
 
+async fn get_regex(ctx: &BotContext<'_>) -> Regex{
+    ctx.data().youtubeRegex.clone()
+}
+
+async fn get_http_client(ctx: &BotContext<'_>) -> reqwest::Client{
+    ctx.data().httpClient.clone()
+}
+
 #[tokio::main]
 async fn main() {
     println!("Starting application");
 
     let token = env::var("DISCORD_TOKEN").expect("Expected discord token to be set in environment");
 
+    // Priveleges for the bot
     let intents = GatewayIntents::GUILD_VOICE_STATES
         | GatewayIntents::GUILDS
         | GatewayIntents::GUILD_MESSAGES
@@ -133,8 +150,13 @@ async fn main() {
     let mut client = Client::builder(&token, intents)
         .framework(framework)
         .register_songbird()
+        .type_map_insert::<Bot>(Bot{
+                    httpClient: HttpClient::new(),
+                    youtubeRegex: Regex::new(r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$").expect("error creating regex"),
+                    songQueue: VecDeque::new()
+            })
         .await
         .expect("Error creating client");
 
-    client.start().await;
+    client.start().await.expect("Could not start client");
 }

@@ -1,4 +1,7 @@
+use songbird::input::YoutubeDl;
+use serenity::model::id::UserId;
+
 pub struct SongMessage{
-    link: String,
-    from: String
+    pub link: YoutubeDl,
+    pub from: UserId
 }
