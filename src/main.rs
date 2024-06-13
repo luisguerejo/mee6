@@ -1,14 +1,27 @@
 use std::env;
 
+use serenity::all::CacheHttp;
+use serenity::all::Http;
 use serenity::prelude::GatewayIntents;
 use serenity::prelude::Client;
-use serenity::model::channel::Message;
+use serenity::model::user::OnlineStatus::{Idle, Online};
+use serenity::gateway::ActivityData;
+use songbird::input::YoutubeDl;
 use songbird::SerenityInit;
+use youtube::SongMessage;
 use std::collections::vec_deque::VecDeque;
+use regex::Regex;
+use reqwest::Client as HttpClient;
 
 mod youtube;
 type Error = Box<dyn std::error::Error + Send + Sync>;
-type BotContext<'a> = poise::Context<'a, VecDeque<youtube::SongMessage>, Error>;
+type BotContext<'a> = poise::Context<'a, Bot, Error>;
+
+struct Bot{
+    pub httpClient: HttpClient,
+    youtubeRegex: Regex,
+    songQueue: VecDeque<youtube::SongMessage>
+}
 
 #[poise::command(
     prefix_command,
@@ -24,7 +37,6 @@ async fn ping(ctx: BotContext<'_>) -> Result<(), Error>{
 async fn join(
     ctx: BotContext<'_>)
     -> Result<(), Error>{
-    ctx.say("Joining!").await?;
     let (guild_id, channel_id) = {
         let guild = ctx.guild().unwrap();
         let channel_id = guild
@@ -49,10 +61,29 @@ async fn join(
 
     match manager.join(guild_id, connect).await {
         Ok(_) => {
-            eprintln!("Succesfully connected!");
-        }
+            let activity = ActivityData::custom("Bumping tunes");
+            ctx.serenity_context().set_presence(Some(activity), Online);
+            Ok(())
+        },
         Err(e) => panic!("Could not join: {:?}", e)
     }
+}
+
+#[poise::command(
+    prefix_command,
+    aliases("p", "queue", "q")
+)]
+async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>{
+    let regex = Regex::new(r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$")?;
+    match regex.is_match(&arg){
+        true => {
+            ctx.say("Got a link!").await?;
+        },
+        false => {
+            ctx.say("Did not get a link!").await?;
+        }
+    };
+
     Ok(())
 }
 
@@ -68,11 +99,12 @@ async fn main() {
         | GatewayIntents::GUILD_MESSAGE_REACTIONS
         | GatewayIntents::MESSAGE_CONTENT;
 
-    let framework = poise::Framework::<VecDeque<youtube::SongMessage>, Error>::builder()
+    let framework = poise::Framework::<Bot, Error>::builder()
         .options(poise::FrameworkOptions {
             commands: vec![
                 ping(),
-                join()
+                join(),
+                play()
             ],
             skip_checks_for_owners: true,
             manual_cooldowns: false,
@@ -86,9 +118,14 @@ async fn main() {
             ..Default::default()
         }).setup(move |ctx, _ready, framework| {
             Box::pin(async move {
-                ctx.set_presence(None, serenity::model::user::OnlineStatus::Idle);
+                let activity = ActivityData::custom("Mimis");
+                ctx.set_presence(Some(activity), Idle);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(VecDeque::<youtube::SongMessage>::new())
+                Ok(Bot{
+                    httpClient: HttpClient::new(),
+                    youtubeRegex: Regex::new(r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$").expect("error creating regex"),
+                    songQueue: VecDeque::new()
+                })
             })
         })
         .build();
