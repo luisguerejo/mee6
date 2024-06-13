@@ -20,16 +20,16 @@ async fn ping(ctx: BotContext<'_>) -> Result<(), Error>{
     Ok(())
 }
 
-#[poise::command(prefix_command, aliases("link"))]
+#[poise::command(prefix_command)]
 async fn join(
-    ctx: BotContext<'_>,
-    msg: Message) -> Result<(), Error>{
+    ctx: BotContext<'_>)
+    -> Result<(), Error>{
     ctx.say("Joining!").await?;
     let (guild_id, channel_id) = {
-        let guild = msg.guild(&ctx.cache()).unwrap();
+        let guild = ctx.guild().unwrap();
         let channel_id = guild
             .voice_states
-            .get(&msg.author.id)
+            .get(&ctx.author().id)
             .and_then(|voice_state| voice_state.channel_id);
 
         (guild.id, channel_id)
