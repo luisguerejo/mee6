@@ -1,7 +1,8 @@
 use std::env;
 use serenity::{
     gateway::ActivityData,
-    model::user::OnlineStatus::{Idle, Online},
+    model::{mention::Mentionable,
+    user::OnlineStatus::{Idle, Online}},
     prelude::{Client, GatewayIntents, TypeMapKey}
 };
 use songbird::input::YoutubeDl;
@@ -11,6 +12,8 @@ use regex::Regex;
 use reqwest::Client as HttpClient;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
+use std::sync::Arc;
 
 mod youtube;
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -21,7 +24,7 @@ struct Bot{
     httpClient: HttpClient,
     youtubeRegex: Regex,
     sender: mpsc::Sender<SongMessage>,
-    recvr: mpsc::Receiver<SongMessage>
+    recvr: Arc<Mutex<mpsc::Receiver<SongMessage>>>
 }
 
 #[poise::command(
@@ -36,38 +39,6 @@ async fn ping(ctx: BotContext<'_>) -> Result<(), Error>{
 
 impl TypeMapKey for Bot{
     type Value = Bot;
-}
-
-async fn driver(mut rx: oneshot::Receiver<SongMessage>) -> Result<(), Error>{
-
-    loop{
-        match rx.try_recv(){
-        Ok(song) => println!("Got a song!: {:?}", song),
-        Err(oneshot::error::TryRecvError::Empty) => continue,
-        Err(oneshot::error::TryRecvError::Closed) => {break;}
-       }
-    }
-
-    Ok(())
-}
-
-
-async fn consumer(mut recvr: mpsc::Receiver<SongMessage>) -> Result<(), Error>{
-
-    let (mut tx, rx) = oneshot::channel();
-
-    let driver = tokio::spawn(async move {
-        driver(rx)
-    });
-
-    while(!recvr.is_empty() && !recvr.is_closed()){
-        let song = recvr.recv().await;
-    }
-
-    tx.closed().await;
-
-
-    Ok(())
 }
 
 #[poise::command(prefix_command)]
@@ -85,7 +56,7 @@ async fn join(
     };
 
     if let None = channel_id {
-        ctx.say("You're not in a channel!").await;
+        let _ = ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await;
         return Ok(())
     };
 
@@ -102,10 +73,16 @@ async fn join(
             }
             let activity = ActivityData::custom("Bumping tunes");
             ctx.serenity_context().set_presence(Some(activity), Online);
-            // let recvr = ctx.data().recvr;
-            // tokio::spawn(async move {
-            //     consumer(recvr);
-            // });
+
+            // Setup of consumer thread
+            let recvr = Arc::clone(&ctx.data().recvr);
+            tokio::spawn(async move {
+                let mut receiver = recvr.lock().await;
+                while let Some(msg) = receiver.recv().await { // Loop on every single message
+                    println!("Received message: {:?}", msg.link);
+
+                }
+            });
             Ok(())
         },
         Err(e) => panic!("Could not join: {:?}", e)
@@ -116,17 +93,19 @@ async fn join(
     prefix_command,
     aliases("p", "queue", "q")
 )]
-async fn play(ctx: BotContext<'_>, #[rest] song: String) -> Result<(), Error>{
+async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>{
     // Queue's up songs to be played
     // TODO if bot hasn't joined, join channel
-    match get_regex(&ctx).await.is_match(&song){
+    match get_regex(&ctx).await.is_match(&arg){
         true => {
             let author = ctx.author().id;
-            let song = YoutubeDl::new(get_http_client(&ctx).await, song);
+            let song = YoutubeDl::new(get_http_client(&ctx).await, arg.clone());
             let msg = SongMessage{link: song, from: author};
+
             if let Err(why) = ctx.data().sender.send(msg).await{
-                panic!("Could not send song to other thread: {:?}", why);
+                eprintln!("Error sending {arg} to receiver");
             }
+            return Ok(())
         
         },
         false => {
@@ -161,13 +140,14 @@ async fn main() {
     // Channels to communicate between threads
     // Consumer thread -> Queue up songs for the voice client thread.
     // Producer threads -> Command handling threads (Sent in a song request)
-    let (send, mut rcv) = mpsc::channel(25);
+    let (send, rcv) = mpsc::channel(25);
     let data = Bot{
         httpClient: HttpClient::new(),
         youtubeRegex: Regex::new(r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$").expect("error creating regex"),
         sender: send,
-        recvr: rcv
+        recvr: Arc::new(Mutex::new(rcv))
     };
+
 
     let framework = poise::Framework::<Bot, Error>::builder()
         .options(poise::FrameworkOptions {
@@ -197,7 +177,6 @@ async fn main() {
             })
         })
         .build();
-        
 
     let mut client = Client::builder(&token, intents)
         .framework(framework)
