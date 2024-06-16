@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+audiopus = "0.2.0"
 poise = "0.6.1"
 regex = "1.10.5"
 reqwest = "0.11"
 serenity = {version = "0.12.2", features = ["client", "gateway", "rustls_backend", "model", "voice"] }
 songbird = "0.4.1"
-tokio = { version = "1.21.2", features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1.21.2", features = ["macros", "rt", "rt-multi-thread", "sync"] }

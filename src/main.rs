@@ -1,5 +1,6 @@
 use std::env;
 use serenity::{
+    async_trait,
     gateway::ActivityData,
     model::{mention::Mentionable,
     user::OnlineStatus::{Idle, Online}},
@@ -7,13 +8,14 @@ use serenity::{
 };
 use songbird::input::YoutubeDl;
 use songbird::SerenityInit;
-use youtube::SongMessage;
+use songbird::input::Input;
 use regex::Regex;
 use reqwest::Client as HttpClient;
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, Notify};
 use tokio::sync::Mutex;
 use std::sync::Arc;
+use std::collections::VecDeque;
+use youtube::SongMessage;
 
 mod youtube;
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -23,8 +25,10 @@ type BotContext<'a> = poise::Context<'a, Bot, Error>;
 struct Bot{
     httpClient: HttpClient,
     youtubeRegex: Regex,
-    sender: mpsc::Sender<SongMessage>,
-    recvr: Arc<Mutex<mpsc::Receiver<SongMessage>>>
+    sender: mpsc::UnboundedSender<youtube::SongMessage>,
+    recvr: Arc<Mutex<mpsc::UnboundedReceiver<youtube::SongMessage>>>,
+    queue: Arc<Mutex<VecDeque<SongMessage>>>,
+    notify: Arc<Notify>
 }
 
 #[poise::command(
@@ -67,20 +71,47 @@ async fn join(
 
     match manager.join(guild_id, channel_id.unwrap()).await {
         Ok(manager) => {
-            let mut manager_lock = manager.lock().await;
-            if let Err(why) = manager_lock.deafen(true).await{
-                eprintln!("Could not deafen when joining: {:?}", why);
-            }
             let activity = ActivityData::custom("Bumping tunes");
             ctx.serenity_context().set_presence(Some(activity), Online);
 
             // Setup of consumer thread
             let recvr = Arc::clone(&ctx.data().recvr);
+            let queue = Arc::clone(&ctx.data().queue);
+            let noti = Arc::clone(&ctx.data().notify);
             tokio::spawn(async move {
                 let mut receiver = recvr.lock().await;
-                while let Some(msg) = receiver.recv().await { // Loop on every single message
-                    println!("Received message: {:?}", msg.link);
+                let notify = noti;
+                println!("Notifier thread going into loop");
+                loop{
+                    if let Some(msg) = receiver.recv().await { // Loop on every single message
+                        println!("Got a request: {:?}", msg.link);
+                        {
+                            queue.lock().await.push_front(msg);
+                            notify.notify_waiters();
+                        }
+                    }else{
+                        println!("Notifier thread going to sleep!");
+                        notify.notified().await;
+                    }
+                }
+            });
 
+            let queue = Arc::clone(&ctx.data().queue);
+            let manager_handle = Arc::clone(&manager);
+            let noti = Arc::clone(&ctx.data().notify);
+
+            tokio::spawn(async move {
+                println!("Starting voice manager thread!");
+                let mut manager = manager_handle.lock().await;
+                println!("Voice manager got all locks!");
+                loop {
+                    println!("Looping from voice manager thread");
+                    if let Some(song) = queue.lock().await.pop_front(){
+                        manager.play_input(song.input);
+                        println!("Playing a song now: {:?}", &song.link)
+                    }else{
+                        noti.notified().await;
+                    }
                 }
             });
             Ok(())
@@ -99,11 +130,14 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>{
     match get_regex(&ctx).await.is_match(&arg){
         true => {
             let author = ctx.author().id;
-            let song = YoutubeDl::new(get_http_client(&ctx).await, arg.clone());
-            let msg = SongMessage{link: song, from: author};
+            let yt = YoutubeDl::new(get_http_client(&ctx).await, arg.clone());
+            let msg = youtube::SongMessage{link: arg.clone(), input: Input::from(yt), from: author};
 
-            if let Err(why) = ctx.data().sender.send(msg).await{
-                eprintln!("Error sending {arg} to receiver");
+            if let Ok(result) = ctx.data().sender.send(msg){
+                ctx.data().notify.notify_waiters();
+                println!("Sent message and notifed waiters!: {:?}", result);
+            }else{
+                println!("Error sending message!");
             }
             return Ok(())
         
@@ -120,11 +154,11 @@ async fn get_regex(ctx: &BotContext<'_>) -> Regex{
     ctx.data().youtubeRegex.clone()
 }
 
-async fn get_http_client(ctx: &BotContext<'_>) -> reqwest::Client{
+async fn get_http_client(ctx: &BotContext<'_>) -> HttpClient{
     ctx.data().httpClient.clone()
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::main(flavor = "multi_thread", worker_threads=10)]
 async fn main() {
     println!("Starting application");
 
@@ -134,18 +168,21 @@ async fn main() {
     let intents = GatewayIntents::GUILD_VOICE_STATES
         | GatewayIntents::GUILDS
         | GatewayIntents::GUILD_MESSAGES
-        | GatewayIntents::GUILD_MESSAGE_REACTIONS
         | GatewayIntents::MESSAGE_CONTENT;
+
+        println!("Intents integer {:?}", &intents);
 
     // Channels to communicate between threads
     // Consumer thread -> Queue up songs for the voice client thread.
     // Producer threads -> Command handling threads (Sent in a song request)
-    let (send, rcv) = mpsc::channel(25);
+    let (send, rcv) = mpsc::unbounded_channel::<youtube::SongMessage>();
     let data = Bot{
         httpClient: HttpClient::new(),
         youtubeRegex: Regex::new(r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$").expect("error creating regex"),
         sender: send,
-        recvr: Arc::new(Mutex::new(rcv))
+        recvr: Arc::new(Mutex::new(rcv)),
+        queue: Arc::new(Mutex::new(VecDeque::new())),
+        notify: Arc::new(Notify::new())
     };
 
 
