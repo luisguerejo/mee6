@@ -1,9 +1,8 @@
 use std::env;
 use serenity::{
     gateway::ActivityData,
-    model::{mention::Mentionable,
-    user::OnlineStatus::{Idle, Online}},
-    prelude::{Client, GatewayIntents}
+    model::{ mention::Mentionable, user::OnlineStatus::{ Idle, Online } },
+    prelude::{ Client, GatewayIntents },
 };
 use songbird::input::YoutubeDl;
 use songbird::SerenityInit;
@@ -18,38 +17,31 @@ mod bot;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type BotContext<'a> = poise::Context<'a, Bot, Error>;
 
-
-#[poise::command(
-    prefix_command,
-    user_cooldown=10,
-    aliases("check", "ustraight")
-)]
-async fn ping(ctx: BotContext<'_>) -> Result<(), Error>{
+#[poise::command(prefix_command, user_cooldown = 10, aliases("check", "ustraight"))]
+async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
     ctx.say("Pong!").await?;
     Ok(())
 }
 
 #[poise::command(prefix_command)]
-async fn join(
-    ctx: BotContext<'_>)
-    -> Result<(), Error>{
+async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
     let (guild_id, channel_id) = {
         let guild = ctx.guild().unwrap();
-        let channel_id = guild
-            .voice_states
+        let channel_id = guild.voice_states
             .get(&ctx.author().id)
             .and_then(|voice_state| voice_state.channel_id);
 
         (guild.id, channel_id)
     };
 
-    if let None = channel_id {
+    if channel_id == None {
+        println!("User not in a channel");
         let _ = ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await;
-        return Ok(())
-    };
+        return Ok(());
+    }
 
-    let manager = songbird::get(&ctx.serenity_context())
-        .await
+    let manager = songbird
+        ::get(&ctx.serenity_context()).await
         .expect("Songbird voice client err")
         .clone();
 
@@ -65,7 +57,7 @@ async fn join(
             tokio::spawn(async move {
                 let mut rec = binding.lock().await;
                 println!("Notifier thread going into loop");
-                loop{
+                loop {
                     if let Some(msg) = rec.recv().await {
                         let mut q = queue.lock().await;
                         q.push_back(msg);
@@ -81,80 +73,100 @@ async fn join(
                 loop {
                     notify.notified().await;
                     let mut queue = queue.lock().await;
-                    if let Some(song) = queue.pop_front(){
+                    if let Some(song) = queue.pop_front() {
                         let mut manager = manager_handle.lock().await;
                         manager.play_input(song.input);
                     }
                 }
             });
             Ok(())
-        },
-        Err(e) => panic!("Could not join: {:?}", e)
+        }
+        Err(e) => panic!("Could not join: {:?}", e),
     }
 }
 
-#[poise::command(
-    prefix_command,
-    aliases("p", "queue", "q")
-)]
-async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>{
+#[poise::command(prefix_command, aliases("p", "queue", "q"))]
+async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
     // Queue's up songs to be played
     // TODO if bot hasn't joined, join channel
-    match get_regex(&ctx).await.is_match(&arg){
+    let (channel_id, bot_channel) = {
+        let guild = ctx.guild().unwrap();
+        let bot = ctx.cache().current_user();
+        // find state of the bot
+        let bot_channel: Option<serenity::model::id::ChannelId> = guild.voice_states
+            .get(&bot.id)
+            .and_then(|voice_state| voice_state.channel_id.map(Into::into));
+        // find state of the user
+        let channel_id = guild.voice_states
+            .get(&ctx.author().id)
+            .and_then(|voice_state| voice_state.channel_id.map(Into::into));
+        (channel_id, bot_channel)
+    };
+
+    if channel_id == None {
+        let _ = ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await;
+        return Ok(());
+    }
+
+    if channel_id != bot_channel {
+        println!("User not in the same channel as bot");
+    }
+
+    match get_regex(&ctx).await.is_match(&arg) {
         true => {
             let author = ctx.author().id;
             let yt = YoutubeDl::new(get_http_client(&ctx).await, arg.clone());
-            let msg = youtube::SongMessage{link: arg.clone(), input: Input::from(yt), from: author};
+            let msg = youtube::SongMessage {
+                link: arg.clone(),
+                input: Input::from(yt),
+                from: author,
+            };
 
-            if let Ok(result) = ctx.data().sender.send(msg){
+            if let Ok(result) = ctx.data().sender.send(msg) {
                 println!("from fn play: Sent message and notifed waiters!: {:?}", result);
-            }else{
+            } else {
                 println!("from fn play: Error sending message!");
             }
-            return Ok(())
-        
-        },
+            return Ok(());
+        }
         false => {
             ctx.say("Did not get a link!").await?;
         }
-    };
+    }
 
     Ok(())
 }
 
-async fn get_regex(ctx: &BotContext<'_>) -> Regex{
+async fn get_regex(ctx: &BotContext<'_>) -> Regex {
     ctx.data().youtubeRegex.clone()
 }
 
-async fn get_http_client(ctx: &BotContext<'_>) -> HttpClient{
+async fn get_http_client(ctx: &BotContext<'_>) -> HttpClient {
     ctx.data().httpClient.clone()
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads=8)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
 async fn main() {
     println!("Starting application");
 
     let token = env::var("DISCORD_TOKEN").expect("Expected discord token to be set in environment");
 
     // Priveleges for the bot
-    let intents = GatewayIntents::GUILD_VOICE_STATES
-        | GatewayIntents::GUILDS
-        | GatewayIntents::GUILD_MESSAGES
-        | GatewayIntents::MESSAGE_CONTENT;
+    let intents =
+        GatewayIntents::GUILD_VOICE_STATES |
+        GatewayIntents::GUILDS |
+        GatewayIntents::GUILD_MESSAGES |
+        GatewayIntents::MESSAGE_CONTENT;
 
     // Channels to communicate between threads
     // Consumer thread -> Queue up songs for the voice client thread.
     // Producer threads -> Command handling threads (Sent in a song request)
     let data = Bot::new();
 
-
-    let framework = poise::Framework::<Bot, Error>::builder()
+    let framework = poise::Framework::<Bot, Error>
+        ::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![
-                ping(),
-                join(),
-                play()
-            ],
+            commands: vec![ping(), join(), play()],
             skip_checks_for_owners: true,
             manual_cooldowns: false,
             prefix_options: poise::PrefixFrameworkOptions {
@@ -179,8 +191,7 @@ async fn main() {
 
     let mut client = Client::builder(&token, intents)
         .framework(framework)
-        .register_songbird()
-        .await
+        .register_songbird().await
         .expect("Error creating client");
 
     client.start().await.expect("Could not start client");
