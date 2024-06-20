@@ -1,13 +1,10 @@
-use std::env;
+use std::{collections::HashSet, env};
 use serenity::{
-    gateway::ActivityData,
-    model::{ mention::Mentionable, user::OnlineStatus::{ Idle, Online } },
-    prelude::{ Client, GatewayIntents },
+    all::CacheHttp, gateway::ActivityData, model::{id::UserId, mention::Mentionable, user::OnlineStatus::{ Idle, Online } }, prelude::{ Client, GatewayIntents }
 };
 use songbird::input::YoutubeDl;
-use songbird::SerenityInit;
 use songbird::input::Input;
-use regex::Regex;
+use songbird::SerenityInit;
 use reqwest::Client as HttpClient;
 use std::sync::Arc;
 use bot::Bot;
@@ -15,11 +12,17 @@ use bot::Bot;
 mod youtube;
 mod bot;
 type Error = Box<dyn std::error::Error + Send + Sync>;
-type BotContext<'a> = poise::Context<'a, Bot, Error>;
+type BotContext<'a> = poise::PrefixContext<'a, Bot, Error>;
 
 #[poise::command(prefix_command, user_cooldown = 10, aliases("check", "ustraight"))]
 async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
     ctx.say("Pong!").await?;
+    Ok(())
+}
+
+#[poise::command(prefix_command, user_cooldown = 10, owners_only)]
+async fn admin(ctx: BotContext<'_>) -> Result<(), Error>{
+    ctx.msg.react(&ctx.http(), '👀').await?;
     Ok(())
 }
 
@@ -89,33 +92,16 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
 async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
     // Queue's up songs to be played
     // TODO if bot hasn't joined, join channel
-    let (channel_id, bot_channel) = {
-        let guild = ctx.guild().unwrap();
-        let bot = ctx.cache().current_user();
-        // find state of the bot
-        let bot_channel: Option<serenity::model::id::ChannelId> = guild.voice_states
-            .get(&bot.id)
-            .and_then(|voice_state| voice_state.channel_id.map(Into::into));
-        // find state of the user
-        let channel_id = guild.voice_states
-            .get(&ctx.author().id)
-            .and_then(|voice_state| voice_state.channel_id.map(Into::into));
-        (channel_id, bot_channel)
-    };
 
-    if channel_id == None {
+    if Arc::strong_count(&ctx.data().reciever) <= 1 {
         let _ = ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await;
         return Ok(());
     }
 
-    if channel_id != bot_channel {
-        println!("User not in the same channel as bot");
-    }
-
-    match get_regex(&ctx).await.is_match(&arg) {
+    match ctx.data.youtubeRegex.is_match(&arg){
         true => {
             let author = ctx.author().id;
-            let yt = YoutubeDl::new(get_http_client(&ctx).await, arg.clone());
+            let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone());
             let msg = youtube::SongMessage {
                 link: arg.clone(),
                 input: Input::from(yt),
@@ -134,18 +120,11 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
         }
     }
 
+    ctx.msg.react(&ctx.http(), '👀').await?;
     Ok(())
 }
 
-async fn get_regex(ctx: &BotContext<'_>) -> Regex {
-    ctx.data().youtubeRegex.clone()
-}
-
-async fn get_http_client(ctx: &BotContext<'_>) -> HttpClient {
-    ctx.data().httpClient.clone()
-}
-
-#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
     println!("Starting application");
 
@@ -166,9 +145,12 @@ async fn main() {
     let framework = poise::Framework::<Bot, Error>
         ::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![ping(), join(), play()],
+            commands: vec![ping(), join(), play(), admin()],
             skip_checks_for_owners: true,
             manual_cooldowns: false,
+            owners: HashSet::from([
+                UserId::new(90550255229091840)
+                ]),
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
                 edit_tracker: None,
