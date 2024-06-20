@@ -1,11 +1,10 @@
 use std::{collections::HashSet, env};
 use serenity::{
-    all::CacheHttp, gateway::ActivityData, model::{id::UserId, mention::Mentionable, user::OnlineStatus::{ Idle, Online } }, prelude::{ Client, GatewayIntents }
+   gateway::ActivityData, model::{id::UserId, mention::Mentionable, user::OnlineStatus::{ Idle, Online }, user::User}, prelude::{ Client, GatewayIntents }
 };
 use songbird::input::YoutubeDl;
 use songbird::input::Input;
 use songbird::SerenityInit;
-use reqwest::Client as HttpClient;
 use std::sync::Arc;
 use bot::Bot;
 
@@ -21,8 +20,18 @@ async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
 }
 
 #[poise::command(prefix_command, user_cooldown = 10, owners_only)]
-async fn admin(ctx: BotContext<'_>) -> Result<(), Error>{
+async fn pardon(ctx: BotContext<'_>, arg: User) -> Result<(), Error>{
+    let _ = ctx.msg.react(&ctx.http(), '👀');
+    let mut set = ctx.data().ignoreList.write().await;
+    set.remove(&arg);
+    Ok(())
+}
+
+#[poise::command(prefix_command, user_cooldown = 10, owners_only)]
+async fn ignore(ctx: BotContext<'_>, arg: User) -> Result<(), Error>{
     ctx.msg.react(&ctx.http(), '👀').await?;
+    let mut set = ctx.data().ignoreList.write().await;
+    set.insert(arg);
     Ok(())
 }
 
@@ -92,6 +101,15 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
 async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
     // Queue's up songs to be played
     // TODO if bot hasn't joined, join channel
+    {
+        let set = &ctx.data.ignoreList;
+        let set = set.read().await;
+        if set.contains(&ctx.author()){
+            let _ = ctx.msg.react(ctx.http(), '💀');
+            return Ok(())
+        }
+    }
+
 
     if Arc::strong_count(&ctx.data().reciever) <= 1 {
         let _ = ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await;
@@ -145,7 +163,7 @@ async fn main() {
     let framework = poise::Framework::<Bot, Error>
         ::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![ping(), join(), play(), admin()],
+            commands: vec![ping(), join(), play(), ignore(), pardon()],
             skip_checks_for_owners: true,
             manual_cooldowns: false,
             owners: HashSet::from([
