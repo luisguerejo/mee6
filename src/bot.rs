@@ -20,7 +20,7 @@ pub struct Bot {
 impl Bot {
     pub fn new() -> Self {
         let (tx, recvr) = tokio::sync::mpsc::unbounded_channel();
-        return Self {
+        Self {
             httpClient: HttpClient::new(),
             youtubeRegex: Regex::new(
                 r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$"
@@ -30,6 +30,6 @@ impl Bot {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             notify: Arc::new(Notify::new()),
             ignoreList: RwLock::new(HashSet::new()),
-        };
+        }
     }
 }

@@ -1,10 +1,13 @@
 use std::{collections::HashSet, env};
 use serenity::{
-   gateway::ActivityData, model::{id::UserId, mention::Mentionable, user::OnlineStatus::{ Idle, Online }, user::User}, prelude::{ Client, GatewayIntents }
+   gateway::ActivityData,
+   model::{id::UserId, mention::Mentionable, user::OnlineStatus::{Idle, Online}, user::User},
+   prelude::{ Client, GatewayIntents }
 };
-use songbird::input::YoutubeDl;
-use songbird::input::Input;
-use songbird::SerenityInit;
+use songbird::{
+    input::{YoutubeDl, Input},
+    SerenityInit
+};
 use std::sync::Arc;
 use bot::Bot;
 
@@ -19,9 +22,9 @@ async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-#[poise::command(prefix_command, user_cooldown = 10, owners_only)]
+#[poise::command(prefix_command, user_cooldown = 10, owners_only, aliases("forgive"))]
 async fn pardon(ctx: BotContext<'_>, arg: User) -> Result<(), Error>{
-    let _ = ctx.msg.react(&ctx.http(), '👀');
+    ctx.msg.react(&ctx.http(), '👀').await?;
     let mut set = ctx.data().ignoreList.write().await;
     set.remove(&arg);
     Ok(())
@@ -46,14 +49,14 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
         (guild.id, channel_id)
     };
 
-    if channel_id == None {
+    if channel_id.is_none() {
         println!("User not in a channel");
         let _ = ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await;
         return Ok(());
     }
 
     let manager = songbird
-        ::get(&ctx.serenity_context()).await
+        ::get(ctx.serenity_context()).await
         .expect("Songbird voice client err")
         .clone();
 
@@ -104,8 +107,8 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
     {
         let set = &ctx.data.ignoreList;
         let set = set.read().await;
-        if set.contains(&ctx.author()){
-            let _ = ctx.msg.react(ctx.http(), '💀');
+        if set.contains(ctx.author()){
+            ctx.msg.react(ctx.http(), '💀').await?;
             return Ok(())
         }
     }
@@ -160,8 +163,7 @@ async fn main() {
     // Producer threads -> Command handling threads (Sent in a song request)
     let data = Bot::new();
 
-    let framework = poise::Framework::<Bot, Error>
-        ::builder()
+    let framework = poise::Framework::<Bot, Error>::builder()
         .options(poise::FrameworkOptions {
             commands: vec![ping(), join(), play(), ignore(), pardon()],
             skip_checks_for_owners: true,
