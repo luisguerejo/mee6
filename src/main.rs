@@ -1,20 +1,51 @@
-use std::{collections::HashSet, env};
+use std::{
+    collections::{HashSet, VecDeque},
+    sync::Arc,
+    env
+};
 use serenity::{
    gateway::ActivityData,
    model::{id::UserId, mention::Mentionable, user::OnlineStatus::{Idle, Online}, user::User},
-   prelude::{ Client, GatewayIntents }
+   prelude::{ Client, GatewayIntents },
+   async_trait
 };
 use songbird::{
     input::{YoutubeDl, Input},
+    EventContext,
+    EventHandler as VoiceEventHandler,
+    TrackEvent,
+    Event,
     SerenityInit
 };
-use std::sync::Arc;
 use bot::Bot;
+use tokio::sync::{Mutex, RwLock};
 
 mod youtube;
 mod bot;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type BotContext<'a> = poise::PrefixContext<'a, Bot, Error>;
+
+struct TrackEventHandler{
+    notify: Arc<tokio::sync::Notify>,
+    queue: Arc<Mutex<VecDeque<youtube::SongMessage>>>,
+    driver: Arc<RwLock<bot::DriverStatus>>
+}
+
+#[async_trait]
+impl VoiceEventHandler for TrackEventHandler {
+    async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event>{
+        let queue = self.queue.lock().await;
+        if !queue.front().is_none() {
+            eprintln!("Track ended, queue isn't empty, notifying driver!");
+            self.notify.notify_waiters();
+        }else{
+            eprintln!("Track ended with empty queue, idling...");
+            let mut driver = self.driver.write().await;
+            *driver = bot::DriverStatus::Idle;
+        }
+        return None
+    }
+}
 
 #[poise::command(prefix_command, user_cooldown = 10, aliases("check", "ustraight"))]
 async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
@@ -51,7 +82,7 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
 
     if channel_id.is_none() {
         println!("User not in a channel");
-        let _ = ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await;
+        ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await?;
         return Ok(());
     }
 
@@ -64,11 +95,25 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
         Ok(manager) => {
             let activity = ActivityData::custom("Bumping tunes");
             ctx.serenity_context().set_presence(Some(activity), Online);
+            {
+                let mut status = ctx.data().driver.write().await;
+                *status = bot::DriverStatus::Idle;
+            }
 
+            let mut handle = manager.lock().await;
+            handle.add_global_event(
+                Event::Track(TrackEvent::End),
+                TrackEventHandler{
+                    notify: ctx.data().notify.clone(),
+                    queue: Arc::clone(&ctx.data.queue),
+                    driver: Arc::clone(&ctx.data().driver)
+                },
+            );
             // Setup of consumer task
             let binding = Arc::clone(&ctx.data().reciever);
             let queue = Arc::clone(&ctx.data().queue);
             let notify = Arc::clone(&ctx.data().notify);
+            let status = Arc::clone(&ctx.data().driver);
             tokio::spawn(async move {
                 let mut rec = binding.lock().await;
                 println!("Notifier thread going into loop");
@@ -76,7 +121,10 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
                     if let Some(msg) = rec.recv().await {
                         let mut q = queue.lock().await;
                         q.push_back(msg);
-                        notify.notify_waiters();
+
+                        if *status.read().await == bot::DriverStatus::Idle {
+                            notify.notify_waiters();
+                        }
                     }
                 }
             });
@@ -84,13 +132,16 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
             let manager_handle = Arc::clone(&manager);
             let notify = Arc::clone(&ctx.data().notify);
             let queue = Arc::clone(&ctx.data().queue);
+            let status = Arc::clone(&ctx.data().driver);
             tokio::spawn(async move {
                 loop {
                     notify.notified().await;
                     let mut queue = queue.lock().await;
-                    if let Some(song) = queue.pop_front() {
+                    if let Some(song) = queue.pop_front(){
                         let mut manager = manager_handle.lock().await;
                         manager.play_input(song.input);
+                        let mut driver = status.write().await;
+                        *driver = bot::DriverStatus::Playing;
                     }
                 }
             });
@@ -103,8 +154,7 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
 #[poise::command(prefix_command, aliases("p", "queue", "q"))]
 async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
     // Queue's up songs to be played
-    // TODO if bot hasn't joined, join channel
-    {
+    { // Check if user is being ignored
         let set = &ctx.data.ignoreList;
         let set = set.read().await;
         if set.contains(ctx.author()){
@@ -113,7 +163,7 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
         }
     }
 
-
+    // Check if bot is in a voice channel by checking the Atomic Reference Count of the receiver
     if Arc::strong_count(&ctx.data().reciever) <= 1 {
         let _ = ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await;
         return Ok(());
@@ -145,7 +195,7 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
     Ok(())
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     println!("Starting application");
 

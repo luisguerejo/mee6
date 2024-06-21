@@ -6,6 +6,13 @@ use std::collections::{HashSet, VecDeque};
 use serenity::model::user::User;
 use crate::youtube::SongMessage;
 
+#[derive(Debug, PartialEq)]
+pub enum DriverStatus{
+    Playing,
+    Idle,
+    Disconnected
+}
+
 #[allow(non_snake_case)]
 pub struct Bot {
     pub httpClient: HttpClient,
@@ -14,7 +21,8 @@ pub struct Bot {
     pub reciever: Arc<Mutex<mpsc::UnboundedReceiver<SongMessage>>>,
     pub queue: Arc<Mutex<VecDeque<SongMessage>>>,
     pub notify: Arc<Notify>,
-    pub ignoreList: RwLock<HashSet<User>>
+    pub ignoreList: RwLock<HashSet<User>>,
+    pub driver: Arc<RwLock<DriverStatus>>
 }
 
 impl Bot {
@@ -30,6 +38,7 @@ impl Bot {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             notify: Arc::new(Notify::new()),
             ignoreList: RwLock::new(HashSet::new()),
+            driver: Arc::new(RwLock::new(DriverStatus::Disconnected))
         }
     }
 }
