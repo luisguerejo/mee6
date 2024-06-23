@@ -17,7 +17,7 @@ use songbird::{
     Event,
     SerenityInit
 };
-use bot::Bot;
+use bot::{Bot, DriverStatus};
 use tokio::sync::{Mutex, RwLock};
 
 mod youtube;
@@ -28,7 +28,7 @@ type BotContext<'a> = poise::PrefixContext<'a, Bot, Error>;
 struct TrackEventHandler{
     notify: Arc<tokio::sync::Notify>,
     queue: Arc<Mutex<VecDeque<youtube::SongMessage>>>,
-    driver: Arc<RwLock<bot::DriverStatus>>
+    driver: Arc<RwLock<DriverStatus>>
 }
 
 #[async_trait]
@@ -41,11 +41,12 @@ impl VoiceEventHandler for TrackEventHandler {
         }else{
             eprintln!("Track ended with empty queue, idling...");
             let mut driver = self.driver.write().await;
-            *driver = bot::DriverStatus::Idle;
+            *driver = DriverStatus::Idle;
         }
         return None
     }
 }
+
 
 #[poise::command(prefix_command, user_cooldown = 10, aliases("check", "ustraight"))]
 async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
@@ -93,11 +94,11 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
 
     match manager.join(guild_id, channel_id.unwrap()).await {
         Ok(manager) => {
-            let activity = ActivityData::custom("Bumping tunes");
+            let activity = ActivityData::custom("bumpin' tunes");
             ctx.serenity_context().set_presence(Some(activity), Online);
             {
                 let mut status = ctx.data().driver.write().await;
-                *status = bot::DriverStatus::Idle;
+                *status = DriverStatus::Idle;
             }
 
             let mut handle = manager.lock().await;
@@ -122,7 +123,7 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
                         let mut q = queue.lock().await;
                         q.push_back(msg);
 
-                        if *status.read().await == bot::DriverStatus::Idle {
+                        if *status.read().await == DriverStatus::Idle {
                             notify.notify_waiters();
                         }
                     }
@@ -141,7 +142,7 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
                         let mut manager = manager_handle.lock().await;
                         manager.play_input(song.input);
                         let mut driver = status.write().await;
-                        *driver = bot::DriverStatus::Playing;
+                        *driver = DriverStatus::Playing;
                     }
                 }
             });
@@ -149,6 +150,37 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
         }
         Err(e) => panic!("Could not join: {:?}", e),
     }
+}
+
+#[poise::command(prefix_command)]
+async fn leave(ctx: BotContext<'_>) -> Result<(), Error>{
+    if Arc::strong_count(&ctx.data.reciever) <= 1{
+        eprintln!("Not in voice channel");
+    }
+    let guild_id = ctx.msg.guild(&ctx.cache()).unwrap().id;
+
+    let manager = songbird::get(&ctx.serenity_context())
+        .await
+        .expect("Could not get songbird client")
+        .clone();
+
+    let handler = manager.get(guild_id).is_some();
+
+    if handler {
+        if let Err(_e) = manager.remove(guild_id).await{
+            eprintln!("Error leaving voice channel!");
+        }
+        let activity = ActivityData::custom("mimis");
+        ctx.serenity_context().set_presence(Some(activity), Online);
+
+        let mut bot_status = ctx.data.driver.write().await;
+        *bot_status = DriverStatus::Disconnected;
+
+        let mut queue = ctx.data.queue.lock().await;
+        queue.clear();
+    }
+
+    Ok(())
 }
 
 #[poise::command(prefix_command, aliases("p", "queue", "q"))]
@@ -162,6 +194,7 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
             return Ok(())
         }
     }
+
 
     // Check if bot is in a voice channel by checking the Atomic Reference Count of the receiver
     if Arc::strong_count(&ctx.data().reciever) <= 1 {
@@ -197,8 +230,6 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
-    println!("Starting application");
-
     let token = env::var("DISCORD_TOKEN").expect("Expected discord token to be set in environment");
 
     // Priveleges for the bot
@@ -215,7 +246,7 @@ async fn main() {
 
     let framework = poise::Framework::<Bot, Error>::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![ping(), join(), play(), ignore(), pardon()],
+            commands: vec![ping(), join(), play(), ignore(), pardon(), leave()],
             skip_checks_for_owners: true,
             manual_cooldowns: false,
             owners: HashSet::from([
@@ -233,7 +264,7 @@ async fn main() {
         .setup(move |ctx, _ready, framework| {
             Box::pin(async move {
                 // Initial activity for the bot and register the commands
-                let activity = ActivityData::custom("Mimis");
+                let activity = ActivityData::custom("mimis");
                 ctx.set_presence(Some(activity), Idle);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(data)
