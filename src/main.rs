@@ -110,25 +110,6 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
                     driver: Arc::clone(&ctx.data().driver)
                 },
             );
-            // Setup of consumer task
-            let binding = Arc::clone(&ctx.data().reciever);
-            let queue = Arc::clone(&ctx.data().queue);
-            let notify = Arc::clone(&ctx.data().notify);
-            let status = Arc::clone(&ctx.data().driver);
-            tokio::spawn(async move {
-                let mut rec = binding.lock().await;
-                println!("Notifier thread going into loop");
-                loop {
-                    if let Some(msg) = rec.recv().await {
-                        let mut q = queue.lock().await;
-                        q.push_back(msg);
-
-                        if *status.read().await == DriverStatus::Idle {
-                            notify.notify_waiters();
-                        }
-                    }
-                }
-            });
 
             let manager_handle = Arc::clone(&manager);
             let notify = Arc::clone(&ctx.data().notify);
@@ -154,9 +135,6 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
 
 #[poise::command(prefix_command)]
 async fn leave(ctx: BotContext<'_>) -> Result<(), Error>{
-    if Arc::strong_count(&ctx.data.reciever) <= 1{
-        eprintln!("Not in voice channel");
-    }
     let guild_id = ctx.msg.guild(&ctx.cache()).unwrap().id;
 
     let manager = songbird::get(&ctx.serenity_context())
@@ -171,7 +149,7 @@ async fn leave(ctx: BotContext<'_>) -> Result<(), Error>{
             eprintln!("Error leaving voice channel!");
         }
         let activity = ActivityData::custom("mimis");
-        ctx.serenity_context().set_presence(Some(activity), Online);
+        ctx.serenity_context().set_presence(Some(activity), Idle);
 
         let mut bot_status = ctx.data.driver.write().await;
         *bot_status = DriverStatus::Disconnected;
@@ -196,12 +174,6 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
     }
 
 
-    // Check if bot is in a voice channel by checking the Atomic Reference Count of the receiver
-    if Arc::strong_count(&ctx.data().reciever) <= 1 {
-        let _ = ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await;
-        return Ok(());
-    }
-
     match ctx.data.youtubeRegex.is_match(&arg){
         true => {
             let author = ctx.author().id;
@@ -212,10 +184,17 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
                 from: author,
             };
 
-            if let Ok(result) = ctx.data().sender.send(msg) {
-                println!("from fn play: Sent message and notifed waiters!: {:?}", result);
-            } else {
-                println!("from fn play: Error sending message!");
+            match *ctx.data.driver.read().await {
+                DriverStatus::Idle => {
+                    let mut vec = ctx.data.queue.lock().await;
+                    vec.push_front(msg);
+                    ctx.data.notify.notify_waiters();
+                },
+                DriverStatus::Playing => {
+                    let mut vec = ctx.data.queue.lock().await;
+                    vec.push_back(msg);
+                },
+                DriverStatus::Disconnected => panic!("Driver is not connected. Should not be queueing songs!")
             }
             return Ok(());
         }
