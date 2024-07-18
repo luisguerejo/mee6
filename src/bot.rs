@@ -20,7 +20,7 @@ pub struct Bot {
     pub queue: Arc<Mutex<VecDeque<SongMessage>>>,
     pub notify: Arc<Notify>,
     pub ignoreList: RwLock<HashSet<User>>,
-    pub driver: Arc<RwLock<DriverStatus>>
+    pub driverStatus: Arc<RwLock<DriverStatus>>
 }
 
 impl Bot {
@@ -33,7 +33,7 @@ impl Bot {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             notify: Arc::new(Notify::new()),
             ignoreList: RwLock::new(HashSet::new()),
-            driver: Arc::new(RwLock::new(DriverStatus::Disconnected))
+            driverStatus: Arc::new(RwLock::new(DriverStatus::Disconnected))
         }
     }
 }

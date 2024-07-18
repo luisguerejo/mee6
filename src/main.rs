@@ -97,7 +97,7 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
             let activity = ActivityData::custom("bumpin' tunes");
             ctx.serenity_context().set_presence(Some(activity), Online);
             {
-                let mut status = ctx.data().driver.write().await;
+                let mut status = ctx.data().driverStatus.write().await;
                 *status = DriverStatus::Idle;
             }
 
@@ -107,14 +107,14 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
                 TrackEventHandler{
                     notify: ctx.data().notify.clone(),
                     queue: Arc::clone(&ctx.data.queue),
-                    driver: Arc::clone(&ctx.data().driver)
+                    driver: Arc::clone(&ctx.data().driverStatus)
                 },
             );
 
             let manager_handle = Arc::clone(&manager);
             let notify = Arc::clone(&ctx.data().notify);
             let queue = Arc::clone(&ctx.data().queue);
-            let status = Arc::clone(&ctx.data().driver);
+            let status = Arc::clone(&ctx.data().driverStatus);
             tokio::spawn(async move {
                 loop {
                     notify.notified().await;
@@ -151,7 +151,7 @@ async fn leave(ctx: BotContext<'_>) -> Result<(), Error>{
         let activity = ActivityData::custom("mimis");
         ctx.serenity_context().set_presence(Some(activity), Idle);
 
-        let mut bot_status = ctx.data.driver.write().await;
+        let mut bot_status = ctx.data.driverStatus.write().await;
         *bot_status = DriverStatus::Disconnected;
 
         let mut queue = ctx.data.queue.lock().await;
@@ -184,7 +184,7 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
                 from: author,
             };
 
-            match *ctx.data.driver.read().await {
+            match *ctx.data.driverStatus.read().await {
                 DriverStatus::Idle => {
                     let mut vec = ctx.data.queue.lock().await;
                     vec.push_front(msg);
