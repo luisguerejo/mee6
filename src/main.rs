@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, error, event, info, span, trace, Level};
+use tracing::{error, event, info, warn, Level};
 
 mod bot;
 mod youtube;
@@ -38,10 +38,8 @@ impl VoiceEventHandler for TrackEventHandler {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
         let queue = self.queue.lock().await;
         if !queue.front().is_none() {
-            eprintln!("Track ended, queue isn't empty, notifying driver!");
             self.notify.notify_waiters();
         } else {
-            eprintln!("Track ended with empty queue, idling...");
             let mut driver = self.driver.write().await;
             *driver = DriverStatus::Idle;
         }
@@ -74,7 +72,7 @@ async fn ignore(ctx: BotContext<'_>, arg: User) -> Result<(), Error> {
 #[poise::command(prefix_command)]
 async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
     info!(
-        "Invoked by {:?}:{:?}\n DriverStatus: {:?}",
+        "SKIP invoked by {:?}:{:?}\n DriverStatus: {:?}",
         &ctx.author().name,
         &ctx.msg.content,
         ctx.data().driverStatus
@@ -119,9 +117,9 @@ async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
                         author,
                         msg
                     );
-                    println!("Skipping when idle, doing nothing!")
                 }
                 DriverStatus::Disconnected => {
+                    error!("Undefined behavior. Should not be able to get a connection");
                     panic!("Undefined behavior. Should not be able to get a connection")
                 }
             }
@@ -135,7 +133,7 @@ async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
 #[poise::command(prefix_command)]
 async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
     info!(
-        "Invoked by {:?}:{:?}\n DriverStatus: {:?}",
+        "JOIN invoked by {:?}:{:?}\n DriverStatus: {:?}",
         &ctx.author().name,
         &ctx.msg.content,
         ctx.data().driverStatus
@@ -151,7 +149,10 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
     };
 
     if channel_id.is_none() {
-        println!("User not in a channel");
+        warn!(
+            "{:?} is not a voice channel! Cannot connect to voice channel",
+            &ctx.author().name
+        );
         ctx.say(format!(
             "{} You're not in a channel!",
             ctx.author().mention()
@@ -202,12 +203,21 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
             });
             Ok(())
         }
-        Err(e) => panic!("Could not join: {:?}", e),
+        Err(e) => {
+            error!("Could not join voice channel: {:?}", e);
+            panic!("Could not join: {:?}", e)
+        }
     }
 }
 
 #[poise::command(prefix_command)]
 async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
+    info!(
+        "LEAVE invoked by {:?}:{:?}\n DriverStatus: {:?}",
+        &ctx.author().name,
+        &ctx.msg.content,
+        ctx.data().driverStatus
+    );
     let guild_id = ctx.msg.guild(&ctx.cache()).unwrap().id;
 
     let manager = songbird::get(&ctx.serenity_context())
@@ -218,8 +228,8 @@ async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
     let handler = manager.get(guild_id).is_some();
 
     if handler {
-        if let Err(_e) = manager.remove(guild_id).await {
-            eprintln!("Error leaving voice channel!");
+        if let Err(e) = manager.remove(guild_id).await {
+            error!("Error leaving voice channel: {:?}", e);
         }
         let activity = ActivityData::custom("mimis");
         ctx.serenity_context().set_presence(Some(activity), Idle);
@@ -237,7 +247,7 @@ async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
 #[poise::command(prefix_command, aliases("p", "queue", "q"))]
 async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
     info!(
-        "Invoked by {:?}:{:?}\n DriverStatus: {:?}",
+        "PLAY invoked by {:?}:{:?}\n DriverStatus: {:?}",
         &ctx.author().name,
         &ctx.msg.content,
         ctx.data().driverStatus
@@ -276,12 +286,13 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
                     vec.push_back(msg);
                 }
                 DriverStatus::Disconnected => {
+                    error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
                     panic!("Driver is not connected. Should not be queueing songs!")
                 }
             }
-            return Ok(());
         }
         false => {
+            warn!("None link song queuing supported yet");
             ctx.say("Did not get a link!").await?;
         }
     }
@@ -339,4 +350,5 @@ async fn main() {
         .expect("Error creating client");
 
     client.start().await.expect("Could not start client");
+    info!("Bot is starting...")
 }
