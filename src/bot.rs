@@ -1,16 +1,16 @@
-use reqwest::Client as HttpClient;
-use regex::Regex;
-use tokio::sync::{ Notify, Mutex, RwLock };
-use std::sync::Arc;
-use std::collections::{HashSet, VecDeque};
-use serenity::model::user::User;
 use crate::youtube::SongMessage;
+use regex::Regex;
+use reqwest::Client as HttpClient;
+use serenity::model::user::User;
+use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
+use tokio::sync::{Mutex, Notify, RwLock};
 
 #[derive(Debug, PartialEq)]
-pub enum DriverStatus{
+pub enum DriverStatus {
     Playing,
     Idle,
-    Disconnected
+    Disconnected,
 }
 
 #[allow(non_snake_case)]
@@ -20,7 +20,7 @@ pub struct Bot {
     pub queue: Arc<Mutex<VecDeque<SongMessage>>>,
     pub notify: Arc<Notify>,
     pub ignoreList: RwLock<HashSet<User>>,
-    pub driverStatus: Arc<RwLock<DriverStatus>>
+    pub driverStatus: Arc<RwLock<DriverStatus>>,
 }
 
 impl Bot {
@@ -33,7 +33,7 @@ impl Bot {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             notify: Arc::new(Notify::new()),
             ignoreList: RwLock::new(HashSet::new()),
-            driverStatus: Arc::new(RwLock::new(DriverStatus::Disconnected))
+            driverStatus: Arc::new(RwLock::new(DriverStatus::Disconnected)),
         }
     }
 }

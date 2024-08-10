@@ -1,52 +1,53 @@
-use std::{
-    collections::{HashSet, VecDeque},
-    sync::Arc,
-    env
-};
+use bot::{Bot, DriverStatus};
 use serenity::{
-   gateway::ActivityData,
-   model::{id::UserId, mention::Mentionable, user::OnlineStatus::{Idle, Online}, user::User},
-   prelude::{ Client, GatewayIntents },
-   async_trait
+    async_trait,
+    gateway::ActivityData,
+    model::{
+        id::UserId,
+        mention::Mentionable,
+        user::OnlineStatus::{Idle, Online},
+        user::User,
+    },
+    prelude::{Client, GatewayIntents},
 };
 use songbird::{
-    input::{YoutubeDl, Input},
-    EventContext,
-    EventHandler as VoiceEventHandler,
-    TrackEvent,
-    Event,
-    SerenityInit
+    input::{Input, YoutubeDl},
+    Event, EventContext, EventHandler as VoiceEventHandler, SerenityInit, TrackEvent,
 };
-use bot::{Bot, DriverStatus};
+use std::{
+    collections::{HashSet, VecDeque},
+    env,
+    sync::Arc,
+};
 use tokio::sync::{Mutex, RwLock};
+use tracing::{debug, error, event, info, span, trace, Level};
 
-mod youtube;
 mod bot;
+mod youtube;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type BotContext<'a> = poise::PrefixContext<'a, Bot, Error>;
 
-struct TrackEventHandler{
+struct TrackEventHandler {
     notify: Arc<tokio::sync::Notify>,
     queue: Arc<Mutex<VecDeque<youtube::SongMessage>>>,
-    driver: Arc<RwLock<DriverStatus>>
+    driver: Arc<RwLock<DriverStatus>>,
 }
 
 #[async_trait]
 impl VoiceEventHandler for TrackEventHandler {
-    async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event>{
+    async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
         let queue = self.queue.lock().await;
         if !queue.front().is_none() {
             eprintln!("Track ended, queue isn't empty, notifying driver!");
             self.notify.notify_waiters();
-        }else{
+        } else {
             eprintln!("Track ended with empty queue, idling...");
             let mut driver = self.driver.write().await;
             *driver = DriverStatus::Idle;
         }
-        return None
+        return None;
     }
 }
-
 
 #[poise::command(prefix_command, user_cooldown = 10, aliases("check", "ustraight"))]
 async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
@@ -55,7 +56,7 @@ async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
 }
 
 #[poise::command(prefix_command, user_cooldown = 10, owners_only, aliases("forgive"))]
-async fn pardon(ctx: BotContext<'_>, arg: User) -> Result<(), Error>{
+async fn pardon(ctx: BotContext<'_>, arg: User) -> Result<(), Error> {
     ctx.msg.react(&ctx.http(), '👀').await?;
     let mut set = ctx.data().ignoreList.write().await;
     set.remove(&arg);
@@ -63,7 +64,7 @@ async fn pardon(ctx: BotContext<'_>, arg: User) -> Result<(), Error>{
 }
 
 #[poise::command(prefix_command, user_cooldown = 10, owners_only)]
-async fn ignore(ctx: BotContext<'_>, arg: User) -> Result<(), Error>{
+async fn ignore(ctx: BotContext<'_>, arg: User) -> Result<(), Error> {
     ctx.msg.react(&ctx.http(), '👀').await?;
     let mut set = ctx.data().ignoreList.write().await;
     set.insert(arg);
@@ -71,10 +72,78 @@ async fn ignore(ctx: BotContext<'_>, arg: User) -> Result<(), Error>{
 }
 
 #[poise::command(prefix_command)]
+async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
+    info!(
+        "Invoked by {:?}:{:?}\n DriverStatus: {:?}",
+        &ctx.author().name,
+        &ctx.msg.content,
+        ctx.data().driverStatus
+    );
+    {
+        // Check if user is being ignored
+        let set = &ctx.data.ignoreList;
+        let set = set.read().await;
+        if set.contains(ctx.author()) {
+            ctx.msg.react(ctx.http(), '💀').await?;
+            return Ok(());
+        }
+    }
+    let manager = songbird::get(ctx.serenity_context())
+        .await
+        .expect("Error getting Songbird client")
+        .clone();
+
+    match manager.get(ctx.guild_id().unwrap()) {
+        Some(connection) => {
+            let mut call = connection.lock().await;
+            let notify = Arc::clone(&ctx.data().notify);
+            let mut status = ctx.data().driverStatus.write().await;
+            let song_queue = Arc::clone(&ctx.data().queue);
+
+            match *status {
+                DriverStatus::Playing => {
+                    call.stop();
+                    match song_queue.lock().await.front() {
+                        Some(_) => {
+                            notify.notify_waiters();
+                        }
+                        None => *status = DriverStatus::Idle,
+                    }
+                }
+                DriverStatus::Idle => {
+                    let author = &ctx.author().name;
+                    let msg = &ctx.msg.content;
+                    event!(
+                        Level::ERROR,
+                        "{:?}:{:?} Tried skipping when DriverStatus is idle",
+                        author,
+                        msg
+                    );
+                    println!("Skipping when idle, doing nothing!")
+                }
+                DriverStatus::Disconnected => {
+                    panic!("Undefined behavior. Should not be able to get a connection")
+                }
+            }
+        }
+        None => eprintln!("Could not get connection to skip!"),
+    }
+
+    Ok(())
+}
+
+#[poise::command(prefix_command)]
 async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
+    info!(
+        "Invoked by {:?}:{:?}\n DriverStatus: {:?}",
+        &ctx.author().name,
+        &ctx.msg.content,
+        ctx.data().driverStatus
+    );
     let (guild_id, channel_id) = {
         let guild = ctx.guild().unwrap();
-        let channel_id = guild.voice_states
+        let channel_id = guild
+            .voice_states
             .get(&ctx.author().id)
             .and_then(|voice_state| voice_state.channel_id);
 
@@ -83,12 +152,16 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
 
     if channel_id.is_none() {
         println!("User not in a channel");
-        ctx.say(format!("{} You're not in a channel!", ctx.author().mention())).await?;
+        ctx.say(format!(
+            "{} You're not in a channel!",
+            ctx.author().mention()
+        ))
+        .await?;
         return Ok(());
     }
 
-    let manager = songbird
-        ::get(ctx.serenity_context()).await
+    let manager = songbird::get(ctx.serenity_context())
+        .await
         .expect("Songbird voice client err")
         .clone();
 
@@ -104,10 +177,10 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
             let mut handle = manager.lock().await;
             handle.add_global_event(
                 Event::Track(TrackEvent::End),
-                TrackEventHandler{
+                TrackEventHandler {
                     notify: ctx.data().notify.clone(),
                     queue: Arc::clone(&ctx.data.queue),
-                    driver: Arc::clone(&ctx.data().driverStatus)
+                    driver: Arc::clone(&ctx.data().driverStatus),
                 },
             );
 
@@ -119,7 +192,7 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
                 loop {
                     notify.notified().await;
                     let mut queue = queue.lock().await;
-                    if let Some(song) = queue.pop_front(){
+                    if let Some(song) = queue.pop_front() {
                         let mut manager = manager_handle.lock().await;
                         manager.play_input(song.input);
                         let mut driver = status.write().await;
@@ -134,7 +207,7 @@ async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
 }
 
 #[poise::command(prefix_command)]
-async fn leave(ctx: BotContext<'_>) -> Result<(), Error>{
+async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
     let guild_id = ctx.msg.guild(&ctx.cache()).unwrap().id;
 
     let manager = songbird::get(&ctx.serenity_context())
@@ -145,7 +218,7 @@ async fn leave(ctx: BotContext<'_>) -> Result<(), Error>{
     let handler = manager.get(guild_id).is_some();
 
     if handler {
-        if let Err(_e) = manager.remove(guild_id).await{
+        if let Err(_e) = manager.remove(guild_id).await {
             eprintln!("Error leaving voice channel!");
         }
         let activity = ActivityData::custom("mimis");
@@ -163,18 +236,24 @@ async fn leave(ctx: BotContext<'_>) -> Result<(), Error>{
 
 #[poise::command(prefix_command, aliases("p", "queue", "q"))]
 async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
+    info!(
+        "Invoked by {:?}:{:?}\n DriverStatus: {:?}",
+        &ctx.author().name,
+        &ctx.msg.content,
+        ctx.data().driverStatus
+    );
     // Queue's up songs to be played
-    { // Check if user is being ignored
+    {
+        // Check if user is being ignored
         let set = &ctx.data.ignoreList;
         let set = set.read().await;
-        if set.contains(ctx.author()){
+        if set.contains(ctx.author()) {
             ctx.msg.react(ctx.http(), '💀').await?;
-            return Ok(())
+            return Ok(());
         }
     }
 
-
-    match ctx.data.youtubeRegex.is_match(&arg){
+    match ctx.data.youtubeRegex.is_match(&arg) {
         true => {
             let author = ctx.author().id;
             let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone());
@@ -183,18 +262,22 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
                 input: Input::from(yt),
                 from: author,
             };
+            let mut status = ctx.data.driverStatus.write().await;
 
-            match *ctx.data.driverStatus.read().await {
+            match *status {
                 DriverStatus::Idle => {
                     let mut vec = ctx.data.queue.lock().await;
                     vec.push_front(msg);
                     ctx.data.notify.notify_waiters();
-                },
+                    *status = DriverStatus::Playing;
+                }
                 DriverStatus::Playing => {
                     let mut vec = ctx.data.queue.lock().await;
                     vec.push_back(msg);
-                },
-                DriverStatus::Disconnected => panic!("Driver is not connected. Should not be queueing songs!")
+                }
+                DriverStatus::Disconnected => {
+                    panic!("Driver is not connected. Should not be queueing songs!")
+                }
             }
             return Ok(());
         }
@@ -209,14 +292,14 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
+    tracing_subscriber::fmt::init();
     let token = env::var("DISCORD_TOKEN").expect("Expected discord token to be set in environment");
 
     // Priveleges for the bot
-    let intents =
-        GatewayIntents::GUILD_VOICE_STATES |
-        GatewayIntents::GUILDS |
-        GatewayIntents::GUILD_MESSAGES |
-        GatewayIntents::MESSAGE_CONTENT;
+    let intents = GatewayIntents::GUILD_VOICE_STATES
+        | GatewayIntents::GUILDS
+        | GatewayIntents::GUILD_MESSAGES
+        | GatewayIntents::MESSAGE_CONTENT;
 
     // Channels to communicate between threads
     // Consumer thread -> Queue up songs for the voice client thread.
@@ -225,12 +308,10 @@ async fn main() {
 
     let framework = poise::Framework::<Bot, Error>::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![ping(), join(), play(), ignore(), pardon(), leave()],
+            commands: vec![ping(), join(), play(), ignore(), pardon(), leave(), skip()],
             skip_checks_for_owners: true,
             manual_cooldowns: false,
-            owners: HashSet::from([
-                UserId::new(90550255229091840)
-                ]),
+            owners: HashSet::from([UserId::new(90550255229091840)]),
             prefix_options: poise::PrefixFrameworkOptions {
                 prefix: Some("!".into()),
                 edit_tracker: None,
@@ -253,7 +334,8 @@ async fn main() {
 
     let mut client = Client::builder(&token, intents)
         .framework(framework)
-        .register_songbird().await
+        .register_songbird()
+        .await
         .expect("Error creating client");
 
     client.start().await.expect("Could not start client");
