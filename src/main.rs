@@ -1,4 +1,4 @@
-use bot::{Bot, DriverStatus};
+use bot::{Bot, DriverStatus, QueueRequest};
 use serenity::{
     async_trait,
     gateway::ActivityData,
@@ -36,6 +36,7 @@ struct TrackEventHandler {
 #[async_trait]
 impl VoiceEventHandler for TrackEventHandler {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
+        eprintln!("Song ended!");
         let queue = self.queue.lock().await;
         if !queue.front().is_none() {
             self.notify.notify_waiters();
@@ -263,37 +264,42 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
         }
     }
 
-    match ctx.data.youtubeRegex.is_match(&arg) {
-        true => {
-            let author = ctx.author().id;
-            let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone());
-            let msg = youtube::SongMessage {
-                link: arg.clone(),
-                input: Input::from(yt),
-                from: author,
-            };
-            let mut status = ctx.data.driverStatus.write().await;
+    let yt: YoutubeDl;
 
-            match *status {
-                DriverStatus::Idle => {
-                    let mut vec = ctx.data.queue.lock().await;
-                    vec.push_front(msg);
-                    ctx.data.notify.notify_waiters();
-                    *status = DriverStatus::Playing;
-                }
-                DriverStatus::Playing => {
-                    let mut vec = ctx.data.queue.lock().await;
-                    vec.push_back(msg);
-                }
-                DriverStatus::Disconnected => {
-                    error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
-                    panic!("Driver is not connected. Should not be queueing songs!")
-                }
-            }
+    // If we are provided a link for either soundcloud or youtube,
+    // just initiate the input directly.
+    // If a search is provided, query youtube and select first link given.
+    match bot::query(arg.clone()){
+        QueueRequest::YoutubeURL | QueueRequest::Soundcloud => {
+            yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone());
+        },
+        bot::QueueRequest::YoutubeQuery => todo!("Needs to be implemented"),
+    }
+
+    let msg = youtube::SongMessage {
+        link: arg.clone(),
+        input: Input::from(yt),
+        from: ctx.author().id,
+    };
+
+    // Read the status of the driver before queuing.
+    // Different states of the driver require different handling for queueing.
+    let mut status = ctx.data.driverStatus.write().await;
+
+    match *status {
+        DriverStatus::Idle => {
+            let mut vec = ctx.data.queue.lock().await;
+            vec.push_front(msg);
+            ctx.data.notify.notify_waiters();
+            *status = DriverStatus::Playing;
         }
-        false => {
-            warn!("None link song queuing supported yet");
-            ctx.say("Did not get a link!").await?;
+        DriverStatus::Playing => {
+            let mut vec = ctx.data.queue.lock().await;
+            vec.push_back(msg);
+        }
+        DriverStatus::Disconnected => {
+            error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
+            panic!("Driver is not connected. Should not be queueing songs!")
         }
     }
 
