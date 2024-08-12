@@ -30,11 +30,11 @@ pub fn query(arg: String) -> QueueRequest{
             .expect("Error creating regex");
 
         if youtube.is_match(&arg){
-            return QueueRequest::YoutubeURL;
+            QueueRequest::YoutubeURL
         }else if soundcloud.is_match(&arg){
-            return QueueRequest::Soundcloud
+            QueueRequest::Soundcloud
         }else{
-            return QueueRequest::YoutubeQuery
+            QueueRequest::YoutubeQuery
         }
 
 }

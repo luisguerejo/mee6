@@ -38,7 +38,7 @@ impl VoiceEventHandler for TrackEventHandler {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
         eprintln!("Song ended!");
         let queue = self.queue.lock().await;
-        if !queue.front().is_none() {
+        if queue.front().is_some() {
             self.notify.notify_waiters();
         } else {
             let mut driver = self.driver.write().await;
@@ -219,9 +219,9 @@ async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
         &ctx.msg.content,
         ctx.data().driverStatus
     );
-    let guild_id = ctx.msg.guild(&ctx.cache()).unwrap().id;
+    let guild_id = ctx.msg.guild(ctx.cache()).unwrap().id;
 
-    let manager = songbird::get(&ctx.serenity_context())
+    let manager = songbird::get(ctx.serenity_context())
         .await
         .expect("Could not get songbird client")
         .clone();
@@ -264,17 +264,16 @@ async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
         }
     }
 
-    let yt: YoutubeDl;
 
     // If we are provided a link for either soundcloud or youtube,
     // just initiate the input directly.
     // If a search is provided, query youtube and select first link given.
-    match bot::query(arg.clone()){
+    let yt: YoutubeDl = match bot::query(arg.clone()){
         QueueRequest::YoutubeURL | QueueRequest::Soundcloud => {
-            yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone());
+            YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone())
         },
         bot::QueueRequest::YoutubeQuery => todo!("Needs to be implemented"),
-    }
+    };
 
     let msg = youtube::SongMessage {
         link: arg.clone(),
