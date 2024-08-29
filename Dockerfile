@@ -2,7 +2,6 @@ FROM rust AS build
 WORKDIR /usr/src/mee6
 COPY . .
 RUN apt-get update
-RUN apt upgrade
 RUN apt-get install -y --no-install-recommends \
         curl \
         automake \
