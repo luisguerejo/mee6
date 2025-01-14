@@ -1,10 +1,16 @@
-use crate::youtube::SongMessage;
 use regex::Regex;
 use reqwest::Client as HttpClient;
+use serenity::model::id::UserId;
 use serenity::model::user::User;
+use serenity::async_trait;
+use songbird::input::Input;
+use songbird::{Event, EventContext, EventHandler as VoiceEventHandler};
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify, RwLock};
+
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type BotContext<'a> = poise::PrefixContext<'a, Bot, Error>;
 
 #[derive(Debug, PartialEq)]
 pub enum DriverStatus {
@@ -23,6 +29,26 @@ pub struct Bot {
     pub driverStatus: Arc<RwLock<DriverStatus>>,
 }
 
+pub struct TrackEventHandler {
+    pub notify: Arc<tokio::sync::Notify>,
+    pub queue: Arc<Mutex<VecDeque<SongMessage>>>,
+    pub driver: Arc<RwLock<DriverStatus>>,
+}
+
+#[async_trait]
+impl VoiceEventHandler for TrackEventHandler {
+    async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
+        let queue = self.queue.lock().await;
+        if !queue.front().is_none() {
+            self.notify.notify_waiters();
+        } else {
+            let mut driver = self.driver.write().await;
+            *driver = DriverStatus::Idle;
+        }
+        return None;
+    }
+}
+
 impl Bot {
     pub fn new() -> Self {
         Self {
@@ -36,4 +62,10 @@ impl Bot {
             driverStatus: Arc::new(RwLock::new(DriverStatus::Disconnected)),
         }
     }
+}
+
+pub struct SongMessage {
+    pub link: String,
+    pub input: Input,
+    pub from: UserId,
 }
