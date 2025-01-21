@@ -1,19 +1,19 @@
-use crate::bot::{BotContext, Error, DriverStatus, SongMessage, TrackEventHandler};
+use crate::bot::{BotContext, DriverStatus, Error, SongMessage, TrackEventHandler};
 use std::sync::Arc;
 
-use songbird::{
-    input::{Input, YoutubeDl},
-    Event, TrackEvent
-};
 use serenity::{
     gateway::ActivityData,
     model::mention::Mentionable,
+    model::user::OnlineStatus::{Idle, Online},
     model::user::User,
-    model::user::OnlineStatus::{Idle, Online}
+};
+use songbird::{
+    input::{Input, YoutubeDl},
+    Event, TrackEvent,
 };
 
-use tracing::{error, warn, event, info};
 use tracing::Level;
+use tracing::{error, event, info, warn};
 
 #[poise::command(prefix_command, user_cooldown = 10, aliases("check", "ustraight"))]
 pub async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
