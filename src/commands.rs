@@ -2,10 +2,16 @@ use crate::bot::{BotContext, DriverStatus, Error, SongMessage, TrackEventHandler
 use std::sync::Arc;
 
 use serenity::{
+    builder::{CreateMessage, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption},
     gateway::ActivityData,
-    model::mention::Mentionable,
-    model::user::OnlineStatus::{Idle, Online},
-    model::user::User,
+    model::{
+        application::ComponentInteractionDataKind,
+        mention::Mentionable,
+        user::{
+            OnlineStatus::{Idle, Online},
+            User,
+        },
+    },
 };
 use songbird::{
     input::{Input, YoutubeDl},
@@ -169,6 +175,7 @@ pub async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
                     }
                 }
             });
+            ctx.msg.react(&ctx.http(), '👀').await?;
             Ok(())
         }
         Err(e) => {
@@ -234,7 +241,8 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
     match ctx.data.youtubeRegex.is_match(&arg) {
         true => {
             let author = ctx.author().id;
-            let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone());
+            let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone())
+                .user_args(vec![String::from("--cookies-from-browser firefox")]);
             let msg = SongMessage {
                 link: arg.clone(),
                 input: Input::from(yt),
@@ -260,8 +268,100 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
             }
         }
         false => {
-            warn!("None link song queuing supported yet");
-            ctx.say("Did not get a link!").await?;
+            // Youtube search for the song
+            let mut search = YoutubeDl::new_search(ctx.data.httpClient.clone(), arg);
+            let results = search
+                .search(Some(5))
+                .await
+                .expect("No query results returned");
+            // Format the message to look nicely
+            let mut message = String::new();
+            for (song, num) in results.iter().zip(1..=5) {
+                let title: &String = song.title.as_ref().expect("Should be a song title");
+                message.push_str(format!("{num}. {title}\n").as_str())
+            }
+            let msg = ctx
+                .msg
+                .channel_id
+                .send_message(
+                    &ctx,
+                    CreateMessage::new().content(message).select_menu(
+                        CreateSelectMenu::new(
+                            "animal_select",
+                            CreateSelectMenuKind::String {
+                                options: vec![
+                                    CreateSelectMenuOption::new("1️⃣", "1"),
+                                    CreateSelectMenuOption::new("2️⃣", "2"),
+                                    CreateSelectMenuOption::new("3️⃣", "3"),
+                                    CreateSelectMenuOption::new("4️⃣", "4"),
+                                    CreateSelectMenuOption::new("5️⃣", "5"),
+                                ],
+                            },
+                        )
+                        .custom_id("animal_select")
+                        .placeholder("Waiting for selection"),
+                    ),
+                )
+                .await
+                .unwrap();
+            // The interaction waits for a response on the song message
+            let interaction = match msg
+                .await_component_interaction(&ctx.serenity_context().shard)
+                .timeout(std::time::Duration::from_secs(60))
+                .await
+            {
+                Some(x) => x,
+                None => {
+                    msg.reply(&ctx, "Timed out").await.unwrap();
+                    return Ok(());
+                }
+            };
+
+            // Fetch what the user selected
+            let song = match &interaction.data.kind {
+                ComponentInteractionDataKind::StringSelect { values } => &values[0],
+                _ => panic!("Unexpected interaction data kind"),
+            };
+
+            // Once selected, delete the selection menu so it doesn't get confused
+            msg.delete(&ctx).await?;
+
+            let n = match song.as_str() {
+                "1" => 0,
+                "2" => 1,
+                "3" => 2,
+                "4" => 3,
+                "5" => 4,
+                _ => panic!("Bad song selection should not have happened!"),
+            };
+
+            let mut status = ctx.data.driverStatus.write().await;
+            let song = results.get(n).expect("Should be able to access array");
+            let url = song.source_url.as_ref().unwrap().to_string();
+            let input = SongMessage {
+                link: url.clone(),
+                input: Input::from(YoutubeDl::new(ctx.data.httpClient.clone(), url)),
+                from: interaction.user.id,
+            };
+
+            match *status {
+                DriverStatus::Idle => {
+                    let mut vec = ctx.data.queue.lock().await;
+                    vec.push_front(input);
+                    ctx.data.notify.notify_waiters();
+                    *status = DriverStatus::Playing;
+                }
+                DriverStatus::Playing => {
+                    let mut vec = ctx.data.queue.lock().await;
+                    vec.push_back(input);
+                }
+                DriverStatus::Disconnected => {
+                    error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
+                    panic!("Driver is not connected. Should not be queueing songs!")
+                }
+            }
+
+            dbg!(song);
         }
     }
 
