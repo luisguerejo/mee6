@@ -1,21 +1,15 @@
 use bot::Bot;
 use serenity::{
     gateway::ActivityData,
-    model::{
-        id::UserId,
-        user::OnlineStatus::Idle,
-    },
+    model::{id::UserId, user::OnlineStatus::Idle},
     prelude::{Client, GatewayIntents},
 };
 use songbird::SerenityInit;
-use std::{
-    collections::HashSet,
-    env,
-};
+use std::{collections::HashSet, env};
 use tracing::info;
 
-mod commands;
 mod bot;
+mod commands;
 use bot::Error;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -36,7 +30,13 @@ async fn main() {
 
     let framework = poise::Framework::<Bot, Error>::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![commands::ping(), commands::join(), commands::play(), commands::ignore(), commands::pardon(), commands::leave(), commands::skip()],
+            commands: vec![
+                commands::ping(),
+                commands::join(),
+                commands::play(),
+                commands::leave(),
+                commands::skip(),
+            ],
             skip_checks_for_owners: true,
             manual_cooldowns: false,
             owners: HashSet::from([UserId::new(90550255229091840)]),

@@ -7,10 +7,7 @@ use serenity::{
     model::{
         application::ComponentInteractionDataKind,
         mention::Mentionable,
-        user::{
-            OnlineStatus::{Idle, Online},
-            User,
-        },
+        user::OnlineStatus::{Idle, Online},
     },
 };
 use songbird::{
@@ -27,22 +24,6 @@ pub async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-#[poise::command(prefix_command, user_cooldown = 10, owners_only, aliases("forgive"))]
-pub async fn pardon(ctx: BotContext<'_>, arg: User) -> Result<(), Error> {
-    ctx.msg.react(&ctx.http(), '👀').await?;
-    let mut set = ctx.data().ignoreList.write().await;
-    set.remove(&arg);
-    Ok(())
-}
-
-#[poise::command(prefix_command, user_cooldown = 10, owners_only)]
-pub async fn ignore(ctx: BotContext<'_>, arg: User) -> Result<(), Error> {
-    ctx.msg.react(&ctx.http(), '👀').await?;
-    let mut set = ctx.data().ignoreList.write().await;
-    set.insert(arg);
-    Ok(())
-}
-
 #[poise::command(prefix_command)]
 pub async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
     info!(
@@ -51,15 +32,6 @@ pub async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
         &ctx.msg.content,
         ctx.data().driverStatus
     );
-    {
-        // Check if user is being ignored
-        let set = &ctx.data.ignoreList;
-        let set = set.read().await;
-        if set.contains(ctx.author()) {
-            ctx.msg.react(ctx.http(), '💀').await?;
-            return Ok(());
-        }
-    }
     let manager = songbird::get(ctx.serenity_context())
         .await
         .expect("Error getting Songbird client")
@@ -169,7 +141,7 @@ pub async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
                     let mut queue = queue.lock().await;
                     if let Some(song) = queue.pop_front() {
                         let mut manager = manager_handle.lock().await;
-                        let handle = manager.play_input(song.input);
+                        let handle = manager.play_input(input);
                         let mut driver = status.write().await;
                         *driver = DriverStatus::Playing;
                     }
@@ -228,15 +200,6 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
         ctx.data().driverStatus
     );
     // Queue's up songs to be played
-    {
-        // Check if user is being ignored
-        let set = &ctx.data.ignoreList;
-        let set = set.read().await;
-        if set.contains(ctx.author()) {
-            ctx.msg.react(ctx.http(), '💀').await?;
-            return Ok(());
-        }
-    }
 
     match ctx.data.youtubeRegex.is_match(&arg) {
         true => {

@@ -1,8 +1,6 @@
 use regex::Regex;
 use reqwest::Client as HttpClient;
 use serenity::async_trait;
-use serenity::model::id::UserId;
-use serenity::model::user::User;
 use songbird::input::Input;
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler};
 use std::collections::{HashSet, VecDeque};
@@ -24,8 +22,8 @@ pub struct Bot {
     pub httpClient: HttpClient,
     pub youtubeRegex: Regex,
     pub queue: Arc<Mutex<VecDeque<Input>>>,
+
     pub notify: Arc<Notify>,
-    pub ignoreList: RwLock<HashSet<User>>,
     pub driverStatus: Arc<RwLock<DriverStatus>>,
 }
 
@@ -58,7 +56,6 @@ impl Bot {
             ).expect("error creating regex"),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             notify: Arc::new(Notify::new()),
-            ignoreList: RwLock::new(HashSet::new()),
             driverStatus: Arc::new(RwLock::new(DriverStatus::Disconnected)),
         }
     }
