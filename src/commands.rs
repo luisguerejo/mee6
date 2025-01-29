@@ -1,4 +1,4 @@
-use crate::bot::{BotContext, DriverStatus, Error, SongMessage, TrackEventHandler};
+use crate::bot::{BotContext, DriverStatus, Error, TrackEventHandler};
 use std::sync::Arc;
 
 use serenity::{
@@ -169,7 +169,7 @@ pub async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
                     let mut queue = queue.lock().await;
                     if let Some(song) = queue.pop_front() {
                         let mut manager = manager_handle.lock().await;
-                        manager.play_input(song.input);
+                        let handle = manager.play_input(song.input);
                         let mut driver = status.write().await;
                         *driver = DriverStatus::Playing;
                     }
@@ -240,26 +240,21 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
 
     match ctx.data.youtubeRegex.is_match(&arg) {
         true => {
-            let author = ctx.author().id;
             let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone())
                 .user_args(vec![String::from("--cookies-from-browser firefox")]);
-            let msg = SongMessage {
-                link: arg.clone(),
-                input: Input::from(yt),
-                from: author,
-            };
             let mut status = ctx.data.driverStatus.write().await;
+            let input = Input::from(yt);
 
             match *status {
                 DriverStatus::Idle => {
                     let mut vec = ctx.data.queue.lock().await;
-                    vec.push_front(msg);
+                    vec.push_front(input);
                     ctx.data.notify.notify_waiters();
                     *status = DriverStatus::Playing;
                 }
                 DriverStatus::Playing => {
                     let mut vec = ctx.data.queue.lock().await;
-                    vec.push_back(msg);
+                    vec.push_back(input);
                 }
                 DriverStatus::Disconnected => {
                     error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
@@ -337,23 +332,21 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
 
             let mut status = ctx.data.driverStatus.write().await;
             let song = results.get(n).expect("Should be able to access array");
-            let url = song.source_url.as_ref().unwrap().to_string();
-            let input = SongMessage {
-                link: url.clone(),
-                input: Input::from(YoutubeDl::new(ctx.data.httpClient.clone(), url)),
-                from: interaction.user.id,
-            };
+            let input = YoutubeDl::new(
+                ctx.data().httpClient.clone(),
+                song.source_url.as_ref().expect("Should be a URL").into(),
+            );
 
             match *status {
                 DriverStatus::Idle => {
                     let mut vec = ctx.data.queue.lock().await;
-                    vec.push_front(input);
+                    vec.push_front(input.into());
                     ctx.data.notify.notify_waiters();
                     *status = DriverStatus::Playing;
                 }
                 DriverStatus::Playing => {
                     let mut vec = ctx.data.queue.lock().await;
-                    vec.push_back(input);
+                    vec.push_back(input.into());
                 }
                 DriverStatus::Disconnected => {
                     error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");

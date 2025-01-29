@@ -1,8 +1,8 @@
 use regex::Regex;
 use reqwest::Client as HttpClient;
+use serenity::async_trait;
 use serenity::model::id::UserId;
 use serenity::model::user::User;
-use serenity::async_trait;
 use songbird::input::Input;
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler};
 use std::collections::{HashSet, VecDeque};
@@ -23,7 +23,7 @@ pub enum DriverStatus {
 pub struct Bot {
     pub httpClient: HttpClient,
     pub youtubeRegex: Regex,
-    pub queue: Arc<Mutex<VecDeque<SongMessage>>>,
+    pub queue: Arc<Mutex<VecDeque<Input>>>,
     pub notify: Arc<Notify>,
     pub ignoreList: RwLock<HashSet<User>>,
     pub driverStatus: Arc<RwLock<DriverStatus>>,
@@ -31,7 +31,7 @@ pub struct Bot {
 
 pub struct TrackEventHandler {
     pub notify: Arc<tokio::sync::Notify>,
-    pub queue: Arc<Mutex<VecDeque<SongMessage>>>,
+    pub queue: Arc<Mutex<VecDeque<Input>>>,
     pub driver: Arc<RwLock<DriverStatus>>,
 }
 
@@ -62,10 +62,4 @@ impl Bot {
             driverStatus: Arc::new(RwLock::new(DriverStatus::Disconnected)),
         }
     }
-}
-
-pub struct SongMessage {
-    pub link: String,
-    pub input: Input,
-    pub from: UserId,
 }
