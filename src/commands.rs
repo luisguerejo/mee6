@@ -77,6 +77,22 @@ pub async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
 }
 
 #[poise::command(prefix_command)]
+pub async fn pause(ctx: BotContext<'_>) -> Result<(), Error> {
+    let current_track = Arc::clone(&ctx.data().currentTrack);
+    let mutex = current_track.lock().await;
+    match *mutex {
+        Some(ref track) => track.pause().expect("Error pausing"),
+        None => {
+            error!(
+                "{:?} tried to pause when there is no current track!",
+                ctx.author().name
+            );
+        }
+    }
+    Ok(())
+}
+
+#[poise::command(prefix_command)]
 pub async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
     info!(
         "JOIN invoked by {:?}:{:?}\n DriverStatus: {:?}",
@@ -135,13 +151,22 @@ pub async fn join(ctx: BotContext<'_>) -> Result<(), Error> {
             let notify = Arc::clone(&ctx.data().notify);
             let queue = Arc::clone(&ctx.data().queue);
             let status = Arc::clone(&ctx.data().driverStatus);
+            let current_track = Arc::clone(&ctx.data().currentTrack);
             tokio::spawn(async move {
                 loop {
                     notify.notified().await;
                     let mut queue = queue.lock().await;
                     if let Some(song) = queue.pop_front() {
+                        // Need to grab all associated locks
                         let mut manager = manager_handle.lock().await;
-                        let handle = manager.play_input(input);
+                        let mut current = current_track.lock().await;
+
+                        // Set current track handle from the result of
+                        // play input
+                        let track_handle = manager.play_input(song);
+                        *current = Some(track_handle);
+
+                        // Atomically change the DriverStatus
                         let mut driver = status.write().await;
                         *driver = DriverStatus::Playing;
                     }

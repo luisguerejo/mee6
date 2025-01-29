@@ -2,8 +2,9 @@ use regex::Regex;
 use reqwest::Client as HttpClient;
 use serenity::async_trait;
 use songbird::input::Input;
+use songbird::tracks::TrackHandle;
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler};
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify, RwLock};
 
@@ -22,9 +23,9 @@ pub struct Bot {
     pub httpClient: HttpClient,
     pub youtubeRegex: Regex,
     pub queue: Arc<Mutex<VecDeque<Input>>>,
-
     pub notify: Arc<Notify>,
     pub driverStatus: Arc<RwLock<DriverStatus>>,
+    pub currentTrack: Arc<Mutex<Option<TrackHandle>>>,
 }
 
 pub struct TrackEventHandler {
@@ -57,6 +58,7 @@ impl Bot {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             notify: Arc::new(Notify::new()),
             driverStatus: Arc::new(RwLock::new(DriverStatus::Disconnected)),
+            currentTrack: Arc::new(Mutex::new(None))
         }
     }
 }
