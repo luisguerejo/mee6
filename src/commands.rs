@@ -64,6 +64,7 @@ pub async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
                         msg
                     );
                 }
+                DriverStatus::Paused => todo!(),
                 DriverStatus::Disconnected => {
                     error!("Undefined behavior. Should not be able to get a connection");
                     panic!("Undefined behavior. Should not be able to get a connection")
@@ -225,12 +226,29 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
         ctx.data().driverStatus
     );
     // Queue's up songs to be played
+    let mut status = ctx.data.driverStatus.write().await;
+
+    if *status == DriverStatus::Paused {
+        let current_track = Arc::clone(&ctx.data().currentTrack);
+        let mutex = current_track.lock().await;
+        match *mutex {
+            Some(ref track) => track
+                .play()
+                .expect("Error resuming track from !play command"),
+            None => {
+                error!(
+                    "!play command invoked by {:?}: No current track to resume!",
+                    ctx.author().name
+                );
+            }
+        }
+        return Ok(());
+    }
 
     match ctx.data.youtubeRegex.is_match(&arg) {
         true => {
             let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone())
                 .user_args(vec![String::from("--cookies-from-browser firefox")]);
-            let mut status = ctx.data.driverStatus.write().await;
             let input = Input::from(yt);
 
             match *status {
@@ -244,7 +262,7 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                     let mut vec = ctx.data.queue.lock().await;
                     vec.push_back(input);
                 }
-                DriverStatus::Disconnected => {
+                DriverStatus::Disconnected | DriverStatus::Paused => {
                     error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
                     panic!("Driver is not connected. Should not be queueing songs!")
                 }
@@ -270,7 +288,7 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                     &ctx,
                     CreateMessage::new().content(message).select_menu(
                         CreateSelectMenu::new(
-                            "animal_select",
+                            "song_select",
                             CreateSelectMenuKind::String {
                                 options: vec![
                                     CreateSelectMenuOption::new("1️⃣", "1"),
@@ -281,7 +299,7 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                                 ],
                             },
                         )
-                        .custom_id("animal_select")
+                        .custom_id("song_select")
                         .placeholder("Waiting for selection"),
                     ),
                 )
@@ -295,7 +313,10 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
             {
                 Some(x) => x,
                 None => {
-                    msg.reply(&ctx, "Timed out").await.unwrap();
+                    msg.delete(&ctx)
+                        .await
+                        .expect("Error deleting song selection menu");
+                    ctx.msg.reply(&ctx, "Timed out").await?;
                     return Ok(());
                 }
             };
@@ -332,7 +353,7 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                     ctx.data.notify.notify_waiters();
                     *status = DriverStatus::Playing;
                 }
-                DriverStatus::Playing => {
+                DriverStatus::Playing | DriverStatus::Paused => {
                     let mut vec = ctx.data.queue.lock().await;
                     vec.push_back(input.into());
                 }
@@ -341,8 +362,6 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                     panic!("Driver is not connected. Should not be queueing songs!")
                 }
             }
-
-            dbg!(song);
         }
     }
 

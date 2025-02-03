@@ -15,6 +15,7 @@ pub type BotContext<'a> = poise::PrefixContext<'a, Bot, Error>;
 pub enum DriverStatus {
     Playing,
     Idle,
+    Paused,
     Disconnected,
 }
 
