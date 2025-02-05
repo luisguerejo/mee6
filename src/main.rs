@@ -36,6 +36,7 @@ async fn main() {
                 commands::play(),
                 commands::leave(),
                 commands::skip(),
+                commands::pause(),
             ],
             skip_checks_for_owners: true,
             manual_cooldowns: false,

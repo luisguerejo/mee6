@@ -247,8 +247,7 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
 
     match ctx.data.youtubeRegex.is_match(&arg) {
         true => {
-            let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone())
-                .user_args(vec![String::from("--cookies-from-browser firefox")]);
+            let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone());
             let input = Input::from(yt);
 
             match *status {
@@ -339,7 +338,6 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                 _ => panic!("Bad song selection should not have happened!"),
             };
 
-            let mut status = ctx.data.driverStatus.write().await;
             let song = results.get(n).expect("Should be able to access array");
             let input = YoutubeDl::new(
                 ctx.data().httpClient.clone(),
