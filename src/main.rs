@@ -12,7 +12,7 @@ mod bot;
 mod commands;
 use bot::Error;
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     tracing_subscriber::fmt::init();
     let token = env::var("DISCORD_TOKEN").expect("Expected discord token to be set in environment");

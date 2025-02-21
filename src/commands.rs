@@ -276,7 +276,7 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                 .expect("No query results returned");
             // Format the message to look nicely
             let mut message = String::new();
-            for (song, num) in results.iter().zip(1..=5) {
+            for (song, num) in results.iter().zip(1..=3) {
                 let title: &String = song.title.as_ref().expect("Should be a song title");
                 message.push_str(format!("{num}. {title}\n").as_str())
             }
@@ -293,8 +293,6 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                                     CreateSelectMenuOption::new("1️⃣", "1"),
                                     CreateSelectMenuOption::new("2️⃣", "2"),
                                     CreateSelectMenuOption::new("3️⃣", "3"),
-                                    CreateSelectMenuOption::new("4️⃣", "4"),
-                                    CreateSelectMenuOption::new("5️⃣", "5"),
                                 ],
                             },
                         )
@@ -333,8 +331,6 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                 "1" => 0,
                 "2" => 1,
                 "3" => 2,
-                "4" => 3,
-                "5" => 4,
                 _ => panic!("Bad song selection should not have happened!"),
             };
 
