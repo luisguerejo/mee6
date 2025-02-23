@@ -1,5 +1,5 @@
 use crate::bot::{BotContext, DriverStatus, Error, TrackEventHandler};
-use std::sync::Arc;
+use std::{sync::Arc};
 
 use serenity::{
     builder::{CreateMessage, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption},
@@ -79,10 +79,23 @@ pub async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
 
 #[poise::command(prefix_command)]
 pub async fn pause(ctx: BotContext<'_>) -> Result<(), Error> {
+    info!(
+        "PAUSE invoked by {:?}:{:?}\n DriverStatus: {:?}",
+        &ctx.author().name,
+        &ctx.msg.content,
+        ctx.data().driverStatus
+    );
     let current_track = Arc::clone(&ctx.data().currentTrack);
-    let mutex = current_track.lock().await;
-    match *mutex {
-        Some(ref track) => track.pause().expect("Error pausing"),
+    let current_track = current_track.lock().await;
+
+    let status = Arc::clone(&ctx.data().driverStatus);
+    let mut status = status.write().await;
+    
+    match *current_track {
+        Some(ref track) => {
+            track.pause().expect("Error pausing");
+            *status = DriverStatus::Paused;
+        }
         None => {
             error!(
                 "{:?} tried to pause when there is no current track!",
@@ -245,6 +258,7 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                 );
             }
         }
+        println!("Resuming from play:\n status: {:?}\n current_track: {:?}\n", status, current_track);
         return Ok(());
     }
 
