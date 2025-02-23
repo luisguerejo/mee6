@@ -212,6 +212,9 @@ pub async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
 
         let mut queue = ctx.data.queue.lock().await;
         queue.clear();
+
+        let mut current_track = ctx.data().currentTrack.lock().await;
+        *current_track = None;
     }
 
     Ok(())
