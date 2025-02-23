@@ -1,5 +1,5 @@
 use crate::bot::{BotContext, DriverStatus, Error, TrackEventHandler};
-use std::{sync::Arc};
+use std::sync::Arc;
 
 use serenity::{
     builder::{CreateMessage, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption},
@@ -64,7 +64,7 @@ pub async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
                         msg
                     );
                 }
-                DriverStatus::Paused => todo!(),
+                DriverStatus::Paused => ctx.data.notify.notify_waiters(),
                 DriverStatus::Disconnected => {
                     error!("Undefined behavior. Should not be able to get a connection");
                     panic!("Undefined behavior. Should not be able to get a connection")
@@ -73,7 +73,6 @@ pub async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
         }
         None => eprintln!("Could not get connection to skip!"),
     }
-
     Ok(())
 }
 
@@ -248,9 +247,12 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
         let current_track = Arc::clone(&ctx.data().currentTrack);
         let mutex = current_track.lock().await;
         match *mutex {
-            Some(ref track) => track
+            Some(ref track) => {
+                track
                 .play()
-                .expect("Error resuming track from !play command"),
+                .expect("Error resuming track from !play command");
+                *status = DriverStatus::Playing;
+            }
             None => {
                 error!(
                     "!play command invoked by {:?}: No current track to resume!",
