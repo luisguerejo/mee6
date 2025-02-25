@@ -32,46 +32,20 @@ pub async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
         &ctx.msg.content,
         ctx.data().driverStatus
     );
-    let manager = songbird::get(ctx.serenity_context())
-        .await
-        .expect("Error getting Songbird client")
-        .clone();
 
-    match manager.get(ctx.guild_id().unwrap()) {
-        Some(connection) => {
-            let mut call = connection.lock().await;
-            let notify = Arc::clone(&ctx.data().notify);
-            let mut status = ctx.data().driverStatus.write().await;
-            let song_queue = Arc::clone(&ctx.data().queue);
+    let current_track = Arc::clone(&ctx.data.currentTrack);
+    let current_track = current_track.lock().await;
 
-            match *status {
-                DriverStatus::Playing => {
-                    call.stop();
-                    match song_queue.lock().await.front() {
-                        Some(_) => {
-                            notify.notify_waiters();
-                        }
-                        None => *status = DriverStatus::Idle,
-                    }
-                }
-                DriverStatus::Idle => {
-                    let author = &ctx.author().name;
-                    let msg = &ctx.msg.content;
-                    event!(
-                        Level::ERROR,
-                        "{:?}:{:?} Tried skipping when DriverStatus is idle",
-                        author,
-                        msg
-                    );
-                }
-                DriverStatus::Paused => ctx.data.notify.notify_waiters(),
-                DriverStatus::Disconnected => {
-                    error!("Undefined behavior. Should not be able to get a connection");
-                    panic!("Undefined behavior. Should not be able to get a connection")
-                }
-            }
+    if let Some(track) = &*current_track {
+        let status = Arc::clone(&ctx.data.driverStatus);
+        let status = status.read().await;
+        match *status {
+            DriverStatus::Playing => track.stop()?,
+            DriverStatus::Paused => ctx.data.notify.notify_waiters(),
+            DriverStatus::Disconnected | DriverStatus::Idle => panic!("Should not be able to reach Disconnected or Idle status if there is no current track!")
         }
-        None => eprintln!("Could not get connection to skip!"),
+    } else {
+        ctx.reply("No current song to skip!").await?;
     }
     Ok(())
 }
@@ -89,7 +63,7 @@ pub async fn pause(ctx: BotContext<'_>) -> Result<(), Error> {
 
     let status = Arc::clone(&ctx.data().driverStatus);
     let mut status = status.write().await;
-    
+
     match *current_track {
         Some(ref track) => {
             track.pause().expect("Error pausing");
@@ -249,8 +223,8 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
         match *mutex {
             Some(ref track) => {
                 track
-                .play()
-                .expect("Error resuming track from !play command");
+                    .play()
+                    .expect("Error resuming track from !play command");
                 *status = DriverStatus::Playing;
             }
             None => {
@@ -260,7 +234,10 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                 );
             }
         }
-        println!("Resuming from play:\n status: {:?}\n current_track: {:?}\n", status, current_track);
+        println!(
+            "Resuming from play:\n status: {:?}\n current_track: {:?}\n",
+            status, current_track
+        );
         return Ok(());
     }
 
