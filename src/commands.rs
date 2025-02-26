@@ -207,17 +207,17 @@ pub async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
 }
 
 #[poise::command(prefix_command, aliases("p", "queue", "q"))]
-pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error> {
+pub async fn play(ctx: BotContext<'_>, #[rest] argument: Option<String>) -> Result<(), Error> {
     info!(
         "PLAY invoked by {:?}:{:?}\n DriverStatus: {:?}",
         &ctx.author().name,
         &ctx.msg.content,
-        ctx.data().driverStatus
+        ctx.data.driverStatus
     );
     // Queue's up songs to be played
     let mut status = ctx.data.driverStatus.write().await;
 
-    if *status == DriverStatus::Paused {
+    if argument.is_none() && *status == DriverStatus::Paused {
         let current_track = Arc::clone(&ctx.data().currentTrack);
         let mutex = current_track.lock().await;
         match *mutex {
@@ -239,7 +239,17 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
             status, current_track
         );
         return Ok(());
+    } else if argument.is_none() {
+        error!(
+            "PLAY invoked by {:?}:{:?}\n DriverStatus: {:?}",
+            &ctx.author().name,
+            &ctx.msg.content,
+            ctx.data.driverStatus
+        );
+        return Ok(());
     }
+
+    let arg = argument.unwrap();
 
     match ctx.data.youtubeRegex.is_match(&arg) {
         true => {
@@ -253,11 +263,11 @@ pub async fn play(ctx: BotContext<'_>, #[rest] arg: String) -> Result<(), Error>
                     ctx.data.notify.notify_waiters();
                     *status = DriverStatus::Playing;
                 }
-                DriverStatus::Playing => {
+                DriverStatus::Playing | DriverStatus::Paused => {
                     let mut vec = ctx.data.queue.lock().await;
                     vec.push_back(input);
                 }
-                DriverStatus::Disconnected | DriverStatus::Paused => {
+                DriverStatus::Disconnected => {
                     error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
                     panic!("Driver is not connected. Should not be queueing songs!")
                 }
