@@ -1,6 +1,8 @@
 use crate::bot::{BotContext, DriverStatus, Error, TrackEventHandler};
 use std::sync::Arc;
 
+use crate::tarkov::utils::{fetch_task, format_task_response, load_quests};
+
 use serenity::{
     builder::{CreateMessage, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption},
     gateway::ActivityData,
@@ -364,5 +366,57 @@ pub async fn play(ctx: BotContext<'_>, #[rest] argument: Option<String>) -> Resu
     }
 
     ctx.msg.react(&ctx.http(), '✅').await?;
+    Ok(())
+}
+
+#[poise::command(prefix_command)]
+pub async fn quest(
+    ctx: BotContext<'_>,
+    #[description = "Quest name"] name: String,
+) -> Result<(), Error> {
+    let quests = match load_quests().await {
+        Ok(quests) => quests,
+        Err(e) => {
+            error!("Failed to load quests: {}", e);
+            ctx.say("Failed to load quests. Please try again later.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let matching_quests: Vec<_> = quests
+        .iter()
+        .filter(|quest| quest.name.to_lowercase().contains(&name.to_lowercase()))
+        .collect();
+
+    match matching_quests.len() {
+        0 => {
+            ctx.say("No quests found with that name.").await?;
+        }
+        1 => {
+            let quest = &matching_quests[0];
+
+            match fetch_task(&quest.id).await {
+                Ok(response) => {
+                    let message = format_task_response(&response.data.task);
+                    ctx.say(message).await?;
+                }
+                Err(_) => {
+                    ctx.say("Failed to fetch quest details.").await?;
+                }
+            }
+            return Ok(());
+        }
+        _ => {
+            let quest_list = matching_quests
+                .iter()
+                .map(|quest| quest.name.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            ctx.say(format!("Found multiple matching quests:\n{}", quest_list))
+                .await?;
+        }
+    }
+
     Ok(())
 }

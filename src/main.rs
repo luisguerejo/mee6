@@ -8,11 +8,14 @@ use songbird::SerenityInit;
 use std::{collections::HashSet, env};
 use tracing::info;
 
-mod bot;
 mod commands;
+
+mod bot;
+mod tarkov;
+
 use bot::Error;
 
-#[tokio::main(flavor = "multi_thread")]
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     tracing_subscriber::fmt::init();
     let token = env::var("DISCORD_TOKEN").expect("Expected discord token to be set in environment");
@@ -34,9 +37,9 @@ async fn main() {
                 commands::ping(),
                 commands::join(),
                 commands::play(),
+                commands::quest(),
                 commands::leave(),
                 commands::skip(),
-                commands::pause(),
             ],
             skip_checks_for_owners: true,
             manual_cooldowns: false,
