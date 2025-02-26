@@ -29,3 +29,16 @@ pub struct Key {
     pub avg24hPrice: Option<i64>,
     pub wikiLink: Option<String>,
 }
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Quest {
+    pub id: String,
+    pub name: String,
+}
+pub struct Ammo {
+    pub caliber: String,
+    pub damage: u64,
+    pub armor_damage: u64,
+    pub penetration_power: u64,
+    pub recoil: u64,
+}

@@ -11,8 +11,7 @@ use tracing::info;
 mod commands;
 
 mod bot;
-mod models;
-mod utils;
+mod tarkov;
 
 use bot::Error;
 

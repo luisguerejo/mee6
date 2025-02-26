@@ -1,9 +1,7 @@
 use crate::bot::{BotContext, DriverStatus, Error, TrackEventHandler};
 use std::sync::Arc;
 
-use crate::utils::graphql::fetch_task;
-use crate::utils::loader::load_quests;
-use crate::utils::response::format_task_response;
+use crate::tarkov::utils::{fetch_task, format_task_response, load_quests};
 
 use serenity::{
     builder::{CreateMessage, CreateSelectMenu, CreateSelectMenuKind, CreateSelectMenuOption},
