@@ -38,8 +38,6 @@ async fn main() {
                 commands::join(),
                 commands::play(),
                 commands::quest(),
-                // commands::ignore(),
-                // commands::pardon(),
                 commands::leave(),
                 commands::skip(),
             ],
