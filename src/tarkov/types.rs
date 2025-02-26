@@ -35,6 +35,7 @@ pub struct Quest {
     pub id: String,
     pub name: String,
 }
+
 pub struct Ammo {
     pub caliber: String,
     pub damage: u64,

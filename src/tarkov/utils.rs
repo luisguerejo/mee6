@@ -1,4 +1,4 @@
-use crate::tarkov::types::{Ammo, Quest, Task, TaskResponse};
+use crate::tarkov::types::{Quest, Task, TaskResponse};
 use anyhow::Result;
 use reqwest::Client;
 use serde_json::json;
@@ -15,10 +15,6 @@ pub async fn load_quests() -> Result<Vec<Quest>, Error> {
 
     let quests: Vec<Quest> = serde_json::from_str(&file_content)?;
     Ok(quests)
-}
-
-pub async fn load_ammo() -> Result<Vec<Ammo>, Error> {
-    todo!()
 }
 
 pub async fn fetch_task(id: &str) -> Result<TaskResponse> {
@@ -81,8 +77,4 @@ pub fn format_task_response(task: &Task) -> String {
         **[Wiki Link]({})**",
         task.name, task.kappaRequired, keys_output, task.wikiLink
     )
-}
-
-pub fn format_ammo_response(ammo: &Ammo) -> String {
-    todo!()
 }
