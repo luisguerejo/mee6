@@ -251,120 +251,118 @@ pub async fn play(ctx: BotContext<'_>, #[rest] argument: Option<String>) -> Resu
 
     let arg = argument.unwrap();
 
-    match ctx.data.youtubeRegex.is_match(&arg) {
-        true => {
-            let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone());
-            let input = Input::from(yt);
+    if ctx.data.youtubeRegex.is_match(&arg) || ctx.data.soundcloudRegex.is_match(&arg) {
+        let yt = YoutubeDl::new(ctx.data.httpClient.clone(), arg.clone());
+        let input = Input::from(yt);
 
-            match *status {
-                DriverStatus::Idle => {
-                    let mut vec = ctx.data.queue.lock().await;
-                    vec.push_front(input);
-                    ctx.data.notify.notify_waiters();
-                    *status = DriverStatus::Playing;
-                }
-                DriverStatus::Playing | DriverStatus::Paused => {
-                    let mut vec = ctx.data.queue.lock().await;
-                    vec.push_back(input);
-                }
-                DriverStatus::Disconnected => {
-                    error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
-                    panic!("Driver is not connected. Should not be queueing songs!")
-                }
+        match *status {
+            DriverStatus::Idle => {
+                let mut vec = ctx.data.queue.lock().await;
+                vec.push_front(input);
+                ctx.data.notify.notify_waiters();
+                *status = DriverStatus::Playing;
+            }
+            DriverStatus::Playing | DriverStatus::Paused => {
+                let mut vec = ctx.data.queue.lock().await;
+                vec.push_back(input);
+            }
+            DriverStatus::Disconnected => {
+                error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
+                panic!("Driver is not connected. Should not be queueing songs!")
             }
         }
-        false => {
-            // Youtube search for the song
-            let mut search = YoutubeDl::new_search(ctx.data.httpClient.clone(), arg);
-            let results = search
-                .search(Some(5))
-                .await
-                .expect("No query results returned");
-            // Format the message to look nicely
-            let mut message = String::new();
-            for (song, num) in results.iter().zip(1..=3) {
-                let title: &String = song.title.as_ref().expect("Should be a song title");
-                message.push_str(format!("{num}. {title}\n").as_str())
-            }
-            let msg = ctx
-                .msg
-                .channel_id
-                .send_message(
-                    &ctx,
-                    CreateMessage::new().content(message).select_menu(
-                        CreateSelectMenu::new(
-                            "song_select",
-                            CreateSelectMenuKind::String {
-                                options: vec![
-                                    CreateSelectMenuOption::new("1️⃣", "1"),
-                                    CreateSelectMenuOption::new("2️⃣", "2"),
-                                    CreateSelectMenuOption::new("3️⃣", "3"),
-                                ],
-                            },
-                        )
-                        .custom_id("song_select")
-                        .placeholder("Waiting for selection"),
-                    ),
+        ctx.msg.react(&ctx.http(), '✅').await?;
+        return Ok(());
+    }
+    // Youtube search for the song
+    let mut search = YoutubeDl::new_search(ctx.data.httpClient.clone(), arg);
+    let results = search
+        .search(Some(5))
+        .await
+        .expect("No query results returned");
+    // Format the message to look nicely
+    let mut message = String::new();
+    for (song, num) in results.iter().zip(1..=3) {
+        let title: &String = song.title.as_ref().expect("Should be a song title");
+        message.push_str(format!("{num}. {title}\n").as_str())
+    }
+    let msg = ctx
+        .msg
+        .channel_id
+        .send_message(
+            &ctx,
+            CreateMessage::new().content(message).select_menu(
+                CreateSelectMenu::new(
+                    "song_select",
+                    CreateSelectMenuKind::String {
+                        options: vec![
+                            CreateSelectMenuOption::new("1️⃣", "1"),
+                            CreateSelectMenuOption::new("2️⃣", "2"),
+                            CreateSelectMenuOption::new("3️⃣", "3"),
+                        ],
+                    },
                 )
+                .custom_id("song_select")
+                .placeholder("Waiting for selection"),
+            ),
+        )
+        .await
+        .unwrap();
+    // The interaction waits for a response on the song message
+    let interaction = match msg
+        .await_component_interaction(&ctx.serenity_context().shard)
+        .timeout(std::time::Duration::from_secs(60))
+        .await
+    {
+        Some(x) => x,
+        None => {
+            msg.delete(&ctx)
                 .await
-                .unwrap();
-            // The interaction waits for a response on the song message
-            let interaction = match msg
-                .await_component_interaction(&ctx.serenity_context().shard)
-                .timeout(std::time::Duration::from_secs(60))
-                .await
-            {
-                Some(x) => x,
-                None => {
-                    msg.delete(&ctx)
-                        .await
-                        .expect("Error deleting song selection menu");
-                    ctx.msg.reply(&ctx, "Timed out").await?;
-                    return Ok(());
-                }
-            };
+                .expect("Error deleting song selection menu");
+            ctx.msg.reply(&ctx, "Timed out").await?;
+            return Ok(());
+        }
+    };
 
-            // Fetch what the user selected
-            let song = match &interaction.data.kind {
-                ComponentInteractionDataKind::StringSelect { values } => &values[0],
-                _ => panic!("Unexpected interaction data kind"),
-            };
+    // Fetch what the user selected
+    let song = match &interaction.data.kind {
+        ComponentInteractionDataKind::StringSelect { values } => &values[0],
+        _ => panic!("Unexpected interaction data kind"),
+    };
 
-            // Once selected, delete the selection menu so it doesn't get confused
-            msg.delete(&ctx).await?;
+    // Once selected, delete the selection menu so it doesn't get confused
+    msg.delete(&ctx).await?;
 
-            let n = match song.as_str() {
-                "1" => 0,
-                "2" => 1,
-                "3" => 2,
-                _ => panic!("Bad song selection should not have happened!"),
-            };
+    let n = match song.as_str() {
+        "1" => 0,
+        "2" => 1,
+        "3" => 2,
+        _ => panic!("Bad song selection should not have happened!"),
+    };
 
-            let song = results.get(n).expect("Should be able to access array");
-            let input = YoutubeDl::new(
-                ctx.data().httpClient.clone(),
-                song.source_url.as_ref().expect("Should be a URL").into(),
-            );
+    let song = results.get(n).expect("Should be able to access array");
+    let input = YoutubeDl::new(
+        ctx.data().httpClient.clone(),
+        song.source_url.as_ref().expect("Should be a URL").into(),
+    );
 
-            match *status {
-                DriverStatus::Idle => {
-                    let mut vec = ctx.data.queue.lock().await;
-                    vec.push_front(input.into());
-                    ctx.data.notify.notify_waiters();
-                    *status = DriverStatus::Playing;
-                }
-                DriverStatus::Playing | DriverStatus::Paused => {
-                    let mut vec = ctx.data.queue.lock().await;
-                    vec.push_back(input.into());
-                }
-                DriverStatus::Disconnected => {
-                    error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
-                    panic!("Driver is not connected. Should not be queueing songs!")
-                }
-            }
+    match *status {
+        DriverStatus::Idle => {
+            let mut vec = ctx.data.queue.lock().await;
+            vec.push_front(input.into());
+            ctx.data.notify.notify_waiters();
+            *status = DriverStatus::Playing;
+        }
+        DriverStatus::Playing | DriverStatus::Paused => {
+            let mut vec = ctx.data.queue.lock().await;
+            vec.push_back(input.into());
+        }
+        DriverStatus::Disconnected => {
+            error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
+            panic!("Driver is not connected. Should not be queueing songs!")
         }
     }
 
-    ctx.msg.react(&ctx.http(), '👀').await?;
+    ctx.msg.react(&ctx.http(), '✅').await?;
     Ok(())
 }

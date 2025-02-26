@@ -23,6 +23,7 @@ pub enum DriverStatus {
 pub struct Bot {
     pub httpClient: HttpClient,
     pub youtubeRegex: Regex,
+    pub soundcloudRegex: Regex,
     pub queue: Arc<Mutex<VecDeque<Input>>>,
     pub notify: Arc<Notify>,
     pub driverStatus: Arc<RwLock<DriverStatus>>,
@@ -56,6 +57,7 @@ impl Bot {
             youtubeRegex: Regex::new(
                 r"^((?:https?:)?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$"
             ).expect("error creating regex"),
+            soundcloudRegex: Regex::new(r"(?:https?:\/\/)?(?:www\.)?soundcloud\.com\/([\w-]+)\/([\w-]+)").expect("Error creating soundcloud regex"),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             notify: Arc::new(Notify::new()),
             driverStatus: Arc::new(RwLock::new(DriverStatus::Disconnected)),
