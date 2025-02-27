@@ -39,12 +39,15 @@ pub struct TrackEventHandler {
 #[async_trait]
 impl VoiceEventHandler for TrackEventHandler {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
-        let queue = self.queue.lock().await;
+        let queue = Arc::clone(&self.queue);
+        let queue = queue.lock().await;
+
+        let status = Arc::clone(&self.driver);
+        let mut status = status.write().await;
         if !queue.front().is_none() {
             self.notify.notify_waiters();
         } else {
-            let mut driver = self.driver.write().await;
-            *driver = DriverStatus::Idle;
+            *status = DriverStatus::Idle;
         }
         return None;
     }

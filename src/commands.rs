@@ -188,6 +188,15 @@ pub async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
 
     let handler = manager.get(guild_id).is_some();
 
+    let queue = Arc::clone(&ctx.data.queue);
+    let mut queue = queue.lock().await;
+
+    let current_track = Arc::clone(&ctx.data.currentTrack);
+    let mut current_track = current_track.lock().await;
+
+    let bot_status = Arc::clone(&ctx.data.driverStatus);
+    let mut bot_status = bot_status.write().await;
+
     if handler {
         if let Err(e) = manager.remove(guild_id).await {
             error!("Error leaving voice channel: {:?}", e);
@@ -195,14 +204,11 @@ pub async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
         let activity = ActivityData::custom("mimis");
         ctx.serenity_context().set_presence(Some(activity), Idle);
 
-        let mut bot_status = ctx.data.driverStatus.write().await;
-        *bot_status = DriverStatus::Disconnected;
-
-        let mut queue = ctx.data.queue.lock().await;
         queue.clear();
 
-        let mut current_track = ctx.data().currentTrack.lock().await;
         *current_track = None;
+
+        *bot_status = DriverStatus::Disconnected;
     }
 
     Ok(())
@@ -217,12 +223,17 @@ pub async fn play(ctx: BotContext<'_>, #[rest] argument: Option<String>) -> Resu
         ctx.data.driverStatus
     );
     // Queue's up songs to be played
-    let mut status = ctx.data.driverStatus.write().await;
+    let queue = Arc::clone(&ctx.data.queue);
+    let mut queue = queue.lock().await;
+
+    let current_track = Arc::clone(&ctx.data.currentTrack);
+    let current_track = current_track.lock().await;
+
+    let status = Arc::clone(&ctx.data.driverStatus);
+    let mut status = status.write().await;
 
     if argument.is_none() && *status == DriverStatus::Paused {
-        let current_track = Arc::clone(&ctx.data().currentTrack);
-        let mutex = current_track.lock().await;
-        match *mutex {
+        match *current_track {
             Some(ref track) => {
                 track
                     .play()
@@ -259,14 +270,12 @@ pub async fn play(ctx: BotContext<'_>, #[rest] argument: Option<String>) -> Resu
 
         match *status {
             DriverStatus::Idle => {
-                let mut vec = ctx.data.queue.lock().await;
-                vec.push_front(input);
+                queue.push_front(input);
                 ctx.data.notify.notify_waiters();
                 *status = DriverStatus::Playing;
             }
             DriverStatus::Playing | DriverStatus::Paused => {
-                let mut vec = ctx.data.queue.lock().await;
-                vec.push_back(input);
+                queue.push_back(input);
             }
             DriverStatus::Disconnected => {
                 error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
@@ -350,14 +359,12 @@ pub async fn play(ctx: BotContext<'_>, #[rest] argument: Option<String>) -> Resu
 
     match *status {
         DriverStatus::Idle => {
-            let mut vec = ctx.data.queue.lock().await;
-            vec.push_front(input.into());
+            queue.push_front(input.into());
             ctx.data.notify.notify_waiters();
             *status = DriverStatus::Playing;
         }
         DriverStatus::Playing | DriverStatus::Paused => {
-            let mut vec = ctx.data.queue.lock().await;
-            vec.push_back(input.into());
+            queue.push_back(input.into());
         }
         DriverStatus::Disconnected => {
             error!("Undefined behavior, should be not allowed to queue songs since Bot is not connected");
@@ -417,6 +424,26 @@ pub async fn quest(
                 .await?;
         }
     }
+
+    Ok(())
+}
+
+#[poise::command(prefix_command)]
+pub async fn debug(ctx: BotContext<'_>) -> Result<(), Error> {
+    let current_track = Arc::clone(&ctx.data.currentTrack);
+    let current_track = current_track.lock().await;
+
+    let driver_status = Arc::clone(&ctx.data.driverStatus);
+    let driver_status = driver_status.read().await;
+
+    let msg = format!(
+        r#"Current Track: {:?}
+        DriverStatus: {:?}
+    "#,
+        *current_track, driver_status
+    );
+
+    ctx.reply(msg).await?;
 
     Ok(())
 }
