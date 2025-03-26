@@ -186,10 +186,10 @@ pub async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
         .expect("Could not get songbird client")
         .clone();
 
-    let handler = manager.get(guild_id).is_some();
-
     let queue = Arc::clone(&ctx.data.queue);
     let mut queue = queue.lock().await;
+
+    let handler = manager.get(guild_id).is_some();
 
     let current_track = Arc::clone(&ctx.data.currentTrack);
     let mut current_track = current_track.lock().await;
@@ -198,7 +198,7 @@ pub async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
     let mut bot_status = bot_status.write().await;
 
     if handler {
-        if let Err(e) = manager.remove(guild_id).await {
+        if let Err(e) = manager.leave(guild_id).await {
             error!("Error leaving voice channel: {:?}", e);
         }
         let activity = ActivityData::custom("mimis");
@@ -206,6 +206,11 @@ pub async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
 
         queue.clear();
 
+        if let Some(ref track) = *current_track {
+            track
+                .stop()
+                .expect("Error stopping the track when trying to leave");
+        }
         *current_track = None;
 
         *bot_status = DriverStatus::Disconnected;
