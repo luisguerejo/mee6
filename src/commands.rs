@@ -36,13 +36,16 @@ pub async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
     );
 
     let current_track = Arc::clone(&ctx.data.currentTrack);
-    let current_track = current_track.lock().await;
+    let mut current_track = current_track.lock().await;
 
-    if let Some(track) = &*current_track {
+    if let Some(track) = &mut *current_track {
         let status = Arc::clone(&ctx.data.driverStatus);
         let status = status.read().await;
         match *status {
-            DriverStatus::Playing => track.stop()?,
+            DriverStatus::Playing => {
+                track.stop()?;
+                *current_track = None;
+            },
             DriverStatus::Paused => ctx.data.notify.notify_waiters(),
             DriverStatus::Disconnected | DriverStatus::Idle => panic!("Should not be able to reach Disconnected or Idle status if there is no current track!")
         }
@@ -207,9 +210,9 @@ pub async fn leave(ctx: BotContext<'_>) -> Result<(), Error> {
         queue.clear();
 
         if let Some(ref track) = *current_track {
-            track
-                .stop()
-                .expect("Error stopping the track when trying to leave");
+            if let Err(e) = track.stop() {
+                panic!("Error stopping current track when leaving: {e}");
+            }
         }
         *current_track = None;
 
