@@ -44,9 +44,12 @@ impl VoiceEventHandler for TrackEventHandler {
 
         let status = Arc::clone(&self.driver);
         let mut status = status.write().await;
-        if !queue.front().is_none() {
+        let front = queue.front();
+        if front.is_some() {
             self.notify.notify_waiters();
-        } else {
+        } else if front.is_none() && *status == DriverStatus::Playing
+            || *status == DriverStatus::Paused
+        {
             *status = DriverStatus::Idle;
         }
         return None;
