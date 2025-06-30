@@ -17,8 +17,7 @@ use songbird::{
     Event, TrackEvent,
 };
 
-use tracing::Level;
-use tracing::{error, event, info, warn};
+use tracing::{error, info, warn};
 
 #[poise::command(prefix_command, user_cooldown = 10, aliases("check", "ustraight"))]
 pub async fn ping(ctx: BotContext<'_>) -> Result<(), Error> {
@@ -46,7 +45,7 @@ pub async fn skip(ctx: BotContext<'_>) -> Result<(), Error> {
                 track.stop()?;
                 *current_track = None;
             },
-            DriverStatus::Paused => ctx.data.notify.notify_waiters(),
+            DriverStatus::Paused => ctx.data.notify.notify_one(),
             DriverStatus::Disconnected | DriverStatus::Idle => panic!("Should not be able to reach Disconnected or Idle status if there is no current track!")
         }
     } else {
@@ -279,7 +278,7 @@ pub async fn play(ctx: BotContext<'_>, #[rest] argument: Option<String>) -> Resu
         match *status {
             DriverStatus::Idle => {
                 queue.push_front(input);
-                ctx.data.notify.notify_waiters();
+                ctx.data.notify.notify_one();
                 *status = DriverStatus::Playing;
             }
             DriverStatus::Playing | DriverStatus::Paused => {
@@ -368,7 +367,7 @@ pub async fn play(ctx: BotContext<'_>, #[rest] argument: Option<String>) -> Resu
     match *status {
         DriverStatus::Idle => {
             queue.push_front(input.into());
-            ctx.data.notify.notify_waiters();
+            ctx.data.notify.notify_one();
             *status = DriverStatus::Playing;
         }
         DriverStatus::Playing | DriverStatus::Paused => {

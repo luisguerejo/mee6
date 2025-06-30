@@ -46,7 +46,7 @@ impl VoiceEventHandler for TrackEventHandler {
         let mut status = status.write().await;
         let front = queue.front();
         if front.is_some() {
-            self.notify.notify_waiters();
+            self.notify.notify_one();
         } else if front.is_none() && *status == DriverStatus::Playing
             || *status == DriverStatus::Paused
         {
