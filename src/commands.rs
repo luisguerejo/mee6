@@ -294,10 +294,11 @@ pub async fn play(ctx: BotContext<'_>, #[rest] argument: Option<String>) -> Resu
     }
     // Youtube search for the song
     let mut search = YoutubeDl::new_search(ctx.data.httpClient.clone(), arg);
-    let results = search
+    let results: Vec<_> = search
         .search(Some(5))
         .await
-        .expect("No query results returned");
+        .expect("No query results returned")
+        .collect();
     // Format the message to look nicely
     let mut message = String::new();
     for (song, num) in results.iter().zip(1..=3) {
@@ -358,10 +359,10 @@ pub async fn play(ctx: BotContext<'_>, #[rest] argument: Option<String>) -> Resu
         _ => panic!("Bad song selection should not have happened!"),
     };
 
-    let song = results.get(n).expect("Should be able to access array");
+    let song = results.get(n).expect("Should be able to access array").clone();
     let input = YoutubeDl::new(
         ctx.data().httpClient.clone(),
-        song.source_url.as_ref().expect("Should be a URL").into(),
+        song.source_url.expect("Error getting selected song URL"),
     );
 
     match *status {
