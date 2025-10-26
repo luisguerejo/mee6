@@ -13,7 +13,7 @@ RUN apt-get install -y --no-install-recommends \
 RUN cargo install --path .
 
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Install package dependencies
 RUN apt-get update
@@ -24,6 +24,7 @@ RUN apt-get install -y \
     python3-pip \
     ffmpeg \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-RUN pip3 install --no-cache-dir yt-dlp
+RUN python3 -m pip install --break-system-packages -U "yt-dlp[nightly]"
+
 COPY --from=build /usr/local/cargo/bin/mee6 /usr/local/bin/mee6
 CMD ["mee6"]
