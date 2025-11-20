@@ -11,8 +11,9 @@ mod tarkov;
 
 mod bot;
 use bot::bot::{
-    Context, Error
+    Bot, Context, Error
 };
+use bot::commands;
 
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -29,20 +30,11 @@ async fn main() {
     // Channels to communicate between threads
     // Consumer thread -> Queue up songs for the voice client thread.
     // Producer threads -> Command handling threads (Sent in a song request)
-    let data = Bot::new();
+    let bot = Bot::new();
 
     let framework = poise::Framework::<Context, Error>::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![
-                deprecated_commands::ping(),
-                deprecated_commands::join(),
-                deprecated_commands::play(),
-                deprecated_commands::pause(),
-                deprecated_commands::quest(),
-                deprecated_commands::leave(),
-                deprecated_commands::skip(),
-                deprecated_commands::debug(),
-            ],
+            commands: bot.commands(),
             skip_checks_for_owners: true,
             manual_cooldowns: false,
             owners: HashSet::from([UserId::new(90550255229091840)]),
@@ -61,7 +53,7 @@ async fn main() {
                 let activity = ActivityData::custom("mimis");
                 ctx.set_presence(Some(activity), Idle);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(data)
+                Ok(bot)
             })
         })
         .build();
