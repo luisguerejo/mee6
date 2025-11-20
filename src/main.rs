@@ -1,4 +1,3 @@
-use bot::Bot;
 use serenity::{
     gateway::ActivityData,
     model::{id::UserId, user::OnlineStatus::Idle},
@@ -8,12 +7,13 @@ use songbird::SerenityInit;
 use std::{collections::HashSet, env};
 use tracing::info;
 
-mod commands;
-
-mod bot;
 mod tarkov;
 
-use bot::Error;
+mod bot;
+use bot::bot::{
+    Context, Error
+};
+
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
@@ -31,17 +31,17 @@ async fn main() {
     // Producer threads -> Command handling threads (Sent in a song request)
     let data = Bot::new();
 
-    let framework = poise::Framework::<Bot, Error>::builder()
+    let framework = poise::Framework::<Context, Error>::builder()
         .options(poise::FrameworkOptions {
             commands: vec![
-                commands::ping(),
-                commands::join(),
-                commands::play(),
-                commands::pause(),
-                commands::quest(),
-                commands::leave(),
-                commands::skip(),
-                commands::debug(),
+                deprecated_commands::ping(),
+                deprecated_commands::join(),
+                deprecated_commands::play(),
+                deprecated_commands::pause(),
+                deprecated_commands::quest(),
+                deprecated_commands::leave(),
+                deprecated_commands::skip(),
+                deprecated_commands::debug(),
             ],
             skip_checks_for_owners: true,
             manual_cooldowns: false,
