@@ -1,5 +1,5 @@
 pub mod bot;
 pub mod driver;
 mod status;
-mod commands;
+pub mod commands;
 mod regex;
