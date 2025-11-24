@@ -10,11 +10,8 @@ use tracing::info;
 mod tarkov;
 
 mod bot;
-use bot::bot::{
-    Bot, Context, Error
-};
+use bot::bot::{Bot, Context, Error as BotError};
 use bot::commands;
-
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
@@ -32,9 +29,9 @@ async fn main() {
     // Producer threads -> Command handling threads (Sent in a song request)
     let bot = Bot::new();
 
-    let framework = poise::Framework::<Context, Error>::builder()
+    let framework = poise::Framework::<Context, BotError>::builder()
         .options(poise::FrameworkOptions {
-            commands: bot.commands(),
+            commands: vec![commands::ping(), commands::join()],
             skip_checks_for_owners: true,
             manual_cooldowns: false,
             owners: HashSet::from([UserId::new(90550255229091840)]),
@@ -50,11 +47,11 @@ async fn main() {
         .setup(move |ctx, _ready, framework| {
             Box::pin(async move {
                 // Initial activity for the bot and register the commands
-                let activity = ActivityData::custom("mimis");
-                ctx.set_presence(Some(activity), Idle);
+                // let activity = ActivityData::custom("mimis");
+                // ctx.set_presence(Some(activity), Idle);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(bot)
-            })
+            });
         })
         .build();
 
