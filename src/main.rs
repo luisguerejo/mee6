@@ -1,6 +1,5 @@
 use serenity::{
-    gateway::ActivityData,
-    model::{id::UserId, user::OnlineStatus::Idle},
+    model::id::UserId,
     prelude::{Client, GatewayIntents},
 };
 use songbird::SerenityInit;
@@ -10,8 +9,7 @@ use tracing::info;
 mod tarkov;
 
 mod bot;
-use bot::bot::{Bot, Context, Error as BotError};
-use bot::commands;
+use bot::bot::{Bot, Error as BotError};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
@@ -27,11 +25,10 @@ async fn main() {
     // Channels to communicate between threads
     // Consumer thread -> Queue up songs for the voice client thread.
     // Producer threads -> Command handling threads (Sent in a song request)
-    let bot = Bot::new();
 
-    let framework = poise::Framework::<Context, BotError>::builder()
+    let framework = poise::Framework::<Bot, BotError>::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![commands::ping(), commands::join()],
+            commands: Bot::commands(),
             skip_checks_for_owners: true,
             manual_cooldowns: false,
             owners: HashSet::from([UserId::new(90550255229091840)]),
@@ -50,8 +47,8 @@ async fn main() {
                 // let activity = ActivityData::custom("mimis");
                 // ctx.set_presence(Some(activity), Idle);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(bot)
-            });
+                Ok(Bot::new())
+            })
         })
         .build();
 

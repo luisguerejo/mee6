@@ -8,7 +8,7 @@ use songbird::{Call, Event, EventContext, EventHandler as VoiceEventHandler, Son
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 #[derive(Clone)]
 pub struct Driver {
@@ -35,6 +35,18 @@ impl Driver {
         let status = Arc::clone(&self.status);
         let current_track = Arc::clone(&self.current_track);
 
+        call.lock()
+            .await
+            .add_global_event(Event::Track(songbird::TrackEvent::End), self.clone());
+
+        {
+            // Use scopes to release locks
+            // since we just need to use this mutex
+            // one time out of the loop
+            let mut status = status.lock().await;
+            *status = Status::Idle;
+        }
+
         loop {
             notify.notified().await;
             let mut manager = call.lock().await;
@@ -43,23 +55,23 @@ impl Driver {
             // instead of having to carry around a
             // Future to cancel or join on
             if manager.current_channel().is_none() {
+                let mut status = status.lock().await;
+                *status = Status::Disconnected;
                 break;
             }
 
             let mut queue = queue.lock().await;
+            let mut status = status.lock().await;
             if let Some(song) = queue.pop_front() {
                 // Need to grab all associated locks
                 // let mut manager = manager_handle.lock().await;
                 let mut current = current_track.lock().await;
-
-                // Set current track handle from the result of
-                // play input
                 let track_handle = manager.play_input(song);
                 *current = Some(track_handle);
 
-                // Atomically change the DriverStatus
-                let mut driver = status.lock().await;
-                *driver = Status::Playing;
+                *status = Status::Playing;
+            } else {
+                *status = Status::Idle;
             }
         }
     }
@@ -67,7 +79,6 @@ impl Driver {
     pub async fn leave(&self, manager: Arc<Songbird>, guild_id: GuildId) -> Result<(), Error> {
         let mut queue = self.queue.lock().await;
         let mut current_track = self.current_track.lock().await;
-        let mut status = self.status.lock().await;
 
         if let Some(call) = manager.get(guild_id) {
             let mut call = call.lock().await;
@@ -83,7 +94,7 @@ impl Driver {
                 }
             }
             *current_track = None;
-            *status = Status::Disconnected;
+            self.notify.notify_one();
 
             return Ok(());
         }
@@ -103,7 +114,7 @@ impl Driver {
                 Status::Paused => {
                     self.notify.notify_one();
                 }
-                _ => warn!("Attempting to skip in a none supported state"),
+                _ => info!("Attempting to skip in a none supported state"),
             }
             return Ok(());
         }
@@ -113,6 +124,7 @@ impl Driver {
 
     pub async fn pause_current_track(&self) -> Result<(), Error> {
         let current_track = self.current_track.lock().await;
+        let mut status = self.status.lock().await;
 
         if current_track.is_none() {
             return Err("There is no track to pause".into());
@@ -123,6 +135,7 @@ impl Driver {
             error!("Error pausing track:{}", e);
             return Err("Error pausing track".into());
         }
+        *status = Status::Paused;
 
         Ok(())
     }

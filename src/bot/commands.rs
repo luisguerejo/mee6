@@ -2,7 +2,7 @@ use super::bot::{Context, Error};
 
 use serenity::model::mention::Mentionable;
 
-use tracing::info;
+use tracing::{debug, info};
 
 #[poise::command(prefix_command, user_cooldown = 10, aliases("check", "ustraight"))]
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
@@ -85,8 +85,9 @@ pub async fn play(ctx: Context<'_>, #[rest] argument: Option<String>) -> Result<
     if argument.is_none() {
         return ctx.data.driver.unpause_current_track().await;
     }
+    let link = argument.unwrap();
 
-    ctx.data.play_input(argument.unwrap()).await?;
+    ctx.data.play_input(link).await?;
     ctx.msg.react(&ctx.http(), '✅').await?;
     Ok(())
 }
