@@ -1,7 +1,9 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
+use tracing::debug;
 
-const YOUTUBE_REGEX: &'static str = r"^(()?\/\/)?((?:www|m)\.)?((?:youtube(?:-nocookie)?\.com|youtu.be))(\/(?:[\w\-]+\?v=|embed\/|live\/|v\/)?)([\w\-]+)(\S+)?$";
+const YOUTUBE_REGEX: &'static str =
+    r"(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})";
 
 const SOUNDCLOUD_REGEX: &'static str =
     r"(?:https?:\/\/)?(?:www\.)?soundcloud\.com\/([\w-]+)\/([\w-]+)";
@@ -18,9 +20,11 @@ static BOT_REGEX: Lazy<Regexp> = Lazy::new(|| Regexp {
 });
 
 impl Regexp {
-    pub fn is_supported_link(input: &String) -> bool {
-        let youtube = BOT_REGEX.youtube.is_match(input.as_str());
-        let soundcloud = BOT_REGEX.youtube.is_match(input.as_str());
+    pub fn is_supported_link(input: &str) -> bool {
+        let youtube = BOT_REGEX.youtube.is_match(input);
+        let soundcloud = BOT_REGEX.soundcloud.is_match(input);
+
+        debug!("Regexp for {input}\n youtube: {youtube}\n soundcloud: {soundcloud}\n");
 
         youtube || soundcloud
     }

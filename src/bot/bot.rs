@@ -8,7 +8,6 @@ use songbird::input::{Input, YoutubeDl};
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::PrefixContext<'a, Bot, Error>;
 
-#[allow(non_snake_case)]
 pub struct Bot {
     pub http_client: HttpClient,
     pub driver: Driver,
@@ -22,22 +21,24 @@ impl Bot {
         }
     }
 
-    pub fn commands(&self) -> Vec<Command<Context, Error>> {
+    pub fn commands() -> Vec<Command<Bot, Error>> {
         vec![
             commands::ping(),
             commands::play(),
             commands::pause(),
+            commands::skip(),
             commands::join(),
             commands::leave(),
         ]
     }
 
     pub async fn play_input(&self, user_input: String) -> Result<(), Error> {
-        if Regexp::is_supported_link(&user_input) {
+        if Regexp::is_supported_link(user_input.as_str()) {
             let query = YoutubeDl::new(self.http_client.clone(), user_input);
             let input = Input::from(query);
             self.driver.enqueue_input(input).await?
         }
-        todo!("Add youtube search shit again");
+
+        Ok(())
     }
 }
