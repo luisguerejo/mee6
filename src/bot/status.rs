@@ -8,6 +8,6 @@ pub enum Status {
 
 impl Status {
     pub fn should_enqueue(current_status: Status) -> bool {
-        return current_status != Status::Disconnected || current_status != Status::Idle
+        return current_status != Status::Disconnected || current_status != Status::Idle;
     }
 }
