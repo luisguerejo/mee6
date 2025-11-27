@@ -6,8 +6,8 @@ use songbird::input::Input;
 use songbird::tracks::TrackHandle;
 use songbird::{Call, Event, EventContext, EventHandler as VoiceEventHandler, Songbird};
 use std::collections::VecDeque;
-use std::sync::Arc;
-use tokio::sync::{Mutex, Notify};
+use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 use tracing::{error, info, warn};
 
 #[derive(Clone)]
@@ -28,7 +28,7 @@ impl Driver {
         }
     }
 
-    pub async fn player(&self, call: Arc<Mutex<Call>>) {
+    pub async fn player(&self, call: Arc<tokio::sync::Mutex<Call>>) {
         let call = Arc::clone(&call);
         let notify = Arc::clone(&self.notify);
         let queue = Arc::clone(&self.queue);
@@ -43,7 +43,7 @@ impl Driver {
             // Use scopes to release locks
             // since we just need to use this mutex
             // one time out of the loop
-            let mut status = status.lock().await;
+            let mut status = status.lock().unwrap();
             *status = Status::Idle;
         }
 
@@ -55,17 +55,16 @@ impl Driver {
             // instead of having to carry around a
             // Future to cancel or join on
             if manager.current_channel().is_none() {
-                let mut status = status.lock().await;
+                let mut status = status.lock().unwrap();
                 *status = Status::Disconnected;
                 break;
             }
 
-            let mut queue = queue.lock().await;
-            let mut status = status.lock().await;
+            let mut queue = queue.lock().unwrap();
+            let mut status = status.lock().unwrap();
             if let Some(song) = queue.pop_front() {
                 // Need to grab all associated locks
-                // let mut manager = manager_handle.lock().await;
-                let mut current = current_track.lock().await;
+                let mut current = current_track.lock().unwrap();
                 let track_handle = manager.play_input(song);
                 *current = Some(track_handle);
 
@@ -77,15 +76,15 @@ impl Driver {
     }
 
     pub async fn leave(&self, manager: Arc<Songbird>, guild_id: GuildId) -> Result<(), Error> {
-        let mut queue = self.queue.lock().await;
-        let mut current_track = self.current_track.lock().await;
-
         if let Some(call) = manager.get(guild_id) {
             let mut call = call.lock().await;
             if let Err(e) = call.leave().await {
                 error!("Error leaving voice channel: {:?}", e);
                 return Err(e.to_string().into());
             }
+
+            let mut queue = self.queue.lock().unwrap();
+            let mut current_track = self.current_track.lock().unwrap();
             queue.clear();
 
             if let Some(ref track) = *current_track {
@@ -103,10 +102,10 @@ impl Driver {
     }
 
     pub async fn skip_current_track(&self) -> Result<(), Error> {
-        let mut current_track = self.current_track.lock().await;
+        let mut current_track = self.current_track.lock().unwrap();
 
         if let Some(track) = &mut *current_track {
-            match *self.status.lock().await {
+            match *self.status.lock().unwrap() {
                 Status::Playing => {
                     track.stop()?;
                     *current_track = None
@@ -123,8 +122,8 @@ impl Driver {
     }
 
     pub async fn pause_current_track(&self) -> Result<(), Error> {
-        let current_track = self.current_track.lock().await;
-        let mut status = self.status.lock().await;
+        let current_track = self.current_track.lock().unwrap();
+        let mut status = self.status.lock().unwrap();
 
         if current_track.is_none() {
             return Err("There is no track to pause".into());
@@ -141,7 +140,7 @@ impl Driver {
     }
 
     pub async fn unpause_current_track(&self) -> Result<(), Error> {
-        let current_track = self.current_track.lock().await;
+        let current_track = self.current_track.lock().unwrap();
 
         if current_track.is_none() {
             return Err("There is no track to play".into());
@@ -157,8 +156,8 @@ impl Driver {
     }
 
     pub async fn enqueue_input(&self, input: Input) -> Result<(), Error> {
-        let mut queue = self.queue.lock().await;
-        let status = self.status.lock().await;
+        let mut queue = self.queue.lock().unwrap();
+        let status = self.status.lock().unwrap();
 
         match *status {
             Status::Idle => {
@@ -182,10 +181,10 @@ impl Driver {
 impl VoiceEventHandler for Driver {
     async fn act(&self, _ctx: &EventContext<'_>) -> Option<Event> {
         let queue = Arc::clone(&self.queue);
-        let queue = queue.lock().await;
+        let queue = queue.lock().unwrap();
 
         let status = Arc::clone(&self.status);
-        let mut status = status.lock().await;
+        let mut status = status.lock().unwrap();
         let front = queue.front();
         if front.is_some() {
             self.notify.notify_one();
