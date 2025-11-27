@@ -64,10 +64,9 @@ impl Driver {
             let mut status = status.lock().unwrap();
             if let Some(song) = queue.pop_front() {
                 // Need to grab all associated locks
-                let mut current = current_track.lock().unwrap();
+                let mut current_track = current_track.lock().unwrap();
                 let track_handle = manager.play_input(song);
-                *current = Some(track_handle);
-
+                *current_track = Some(track_handle);
                 *status = Status::Playing;
             } else {
                 *status = Status::Idle;
@@ -89,7 +88,7 @@ impl Driver {
 
             if let Some(ref track) = *current_track {
                 if let Err(e) = track.stop() {
-                    panic!("Error stopping current track when leaving: {e}");
+                    error!("Error stopping current track when leaving: {e}");
                 }
             }
             *current_track = None;
@@ -113,7 +112,7 @@ impl Driver {
                 Status::Paused => {
                     self.notify.notify_one();
                 }
-                _ => info!("Attempting to skip in a none supported state"),
+                _ => error!("Attempting to skip in a none supported state"),
             }
             return Ok(());
         }
@@ -148,8 +147,9 @@ impl Driver {
 
         let input = current_track.as_ref().unwrap();
         if let Err(e) = input.play() {
-            error!("Error unpausing track:{}", e);
-            return Err("Error unpausing track".into());
+            let error_message = format!("Error unpausing track: {e}");
+            error!(error_message);
+            return Err(error_message.into());
         }
 
         Ok(())
@@ -167,10 +167,8 @@ impl Driver {
             Status::Playing | Status::Paused => {
                 queue.push_back(input);
             }
-            _ => {
-                let err_msg = "Undefined behavior, should be not allowed to queue songs since Bot is not connected";
-                error!(err_msg);
-                return Err(err_msg.into());
+            Status::Disconnected => {
+                return Err("Not connected in a voice channel, use !join to connect".into())
             }
         }
         Ok(())
