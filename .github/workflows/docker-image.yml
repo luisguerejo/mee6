@@ -10,7 +10,7 @@ jobs:
       contents: read
       packages: write
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
 
     env:
       REGISTRY: ghcr.io
