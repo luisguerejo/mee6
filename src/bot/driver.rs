@@ -65,7 +65,7 @@ impl Driver {
             if let Some(song) = queue.pop_front() {
                 // Need to grab all associated locks
                 let mut current_track = current_track.lock().unwrap();
-                let track_handle = manager.play_input(song);
+                let track_handle = manager.play_only_input(song);
                 *current_track = Some(track_handle);
                 *status = Status::Playing;
             } else {
@@ -110,7 +110,8 @@ impl Driver {
                     *current_track = None
                 }
                 Status::Paused => {
-                    self.notify.notify_one();
+                    track.stop()?;
+                    *current_track = None;
                 }
                 _ => error!("Attempting to skip in a none supported state"),
             }
@@ -161,8 +162,11 @@ impl Driver {
 
         match *status {
             Status::Idle => {
-                queue.push_front(input);
-                self.notify.notify_one();
+                let was_empty = queue.is_empty();
+                queue.push_back(input);
+                if was_empty {
+                    self.notify.notify_one();
+                }
             }
             Status::Playing | Status::Paused => {
                 queue.push_back(input);
@@ -186,7 +190,7 @@ impl VoiceEventHandler for Driver {
         let front = queue.front();
         if front.is_some() {
             self.notify.notify_one();
-        } else if front.is_none() && *status == Status::Playing || *status == Status::Paused {
+        } else if front.is_none() && (*status == Status::Playing || *status == Status::Paused) {
             *status = Status::Idle;
         }
         return None;
