@@ -8,7 +8,6 @@ use reqwest::Client as HttpClient;
 use serenity::async_trait;
 use songbird::input::Input;
 use songbird::input::YoutubeDl;
-use std::io::Error as StdErr;
 
 const SOUNDCLOUD_REGEX: &'static str =
     r"(?:https?:\/\/)?(?:www\.)?soundcloud\.com\/([\w-]+)\/([\w-]+)";
@@ -25,10 +24,7 @@ impl AudioStream for SoundCloudProvider {
 #[async_trait]
 impl Search for SoundCloudProvider {
     async fn search(&self, query: &str) -> Result<Vec<String>, Error> {
-        Err(Box::new(StdErr::new(
-            std::io::ErrorKind::Other,
-            "Not implemented yet",
-        )))
+        return Err("Not implemented yet".into());
     }
 }
 

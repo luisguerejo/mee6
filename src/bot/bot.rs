@@ -51,12 +51,9 @@ impl Bot {
 
         if let Some(stream) = stream {
             self.driver.enqueue_input(stream).await?;
-        } else {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "No valid stream found",
-            )));
+            return Ok(());
         }
-        Ok(())
+
+        return Err("No valid stream found".into());
     }
 }
