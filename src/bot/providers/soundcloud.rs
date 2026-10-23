@@ -2,6 +2,7 @@ use super::super::bot::Error;
 use super::AudioStream;
 use super::Regexp;
 use super::Search;
+use super::SearchResult;
 
 use regex::Regex;
 use reqwest::Client as HttpClient;
@@ -23,7 +24,11 @@ impl AudioStream for SoundCloudProvider {
 
 #[async_trait]
 impl Search for SoundCloudProvider {
-    async fn search(&self, query: &str) -> Result<Vec<String>, Error> {
+    async fn search(
+        &self,
+        _http_client: HttpClient,
+        _query: &str,
+    ) -> Result<Vec<SearchResult>, Error> {
         return Err("Not implemented yet".into());
     }
 }
