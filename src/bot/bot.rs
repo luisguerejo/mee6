@@ -1,10 +1,10 @@
-use crate::bot::providers::Providers;
+use crate::bot::providers::{Providers, SearchResult};
 
 use super::commands;
 use super::driver::Driver;
 use poise::structs::Command;
 use reqwest::Client as HttpClient;
-use songbird::input::Input;
+use tracing::warn;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::PrefixContext<'a, Bot, Error>;
@@ -33,27 +33,40 @@ impl Bot {
         ]
     }
 
-    pub async fn play_input(&self, user_input: String) -> Result<(), Error> {
-        let providers = Providers::all();
-        let mut stream: Option<Input> = None;
+    pub fn is_link(&self, user_input: &str) -> bool {
+        Providers::all().iter().any(|p| p.is_valid(user_input))
+    }
 
-        if let Some(provider) = providers.iter().find(|p| p.is_valid(&user_input)) {
-            stream = Some(provider.get_stream(self.http_client.clone(), user_input));
-        } else {
-            for provider in providers {
-                let results = provider.search(&user_input).await?;
-                if let Some(result) = results.get(0) {
-                    stream = Some(provider.get_stream(self.http_client.clone(), result.clone()));
-                    break;
-                }
+    /// Returns the results of the first provider that finds any. An empty
+    /// list means nothing was found, not that the search failed.
+    pub async fn search(&self, query: &str) -> Vec<SearchResult> {
+        for provider in Providers::all() {
+            // One broken provider (or one not implemented yet) must not stop
+            // the others from being tried.
+            let results = provider
+                .search(self.http_client.clone(), query)
+                .await
+                .unwrap_or_else(|e| {
+                    warn!("Search failed: {e}");
+                    Vec::new()
+                });
+
+            if !results.is_empty() {
+                return results;
             }
         }
 
-        if let Some(stream) = stream {
-            self.driver.enqueue_input(stream).await?;
-            return Ok(());
-        }
+        Vec::new()
+    }
 
-        return Err("No valid stream found".into());
+    pub async fn play_input(&self, url: String) -> Result<(), Error> {
+        let providers = Providers::all();
+        let provider = providers
+            .iter()
+            .find(|p| p.is_valid(&url))
+            .ok_or("No valid stream found")?;
+
+        let stream = provider.get_stream(self.http_client.clone(), url);
+        self.driver.enqueue_input(stream).await
     }
 }

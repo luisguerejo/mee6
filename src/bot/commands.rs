@@ -1,4 +1,5 @@
 use super::bot::{Context, Error};
+use super::search_menu;
 
 use serenity::model::mention::Mentionable;
 
@@ -13,13 +14,13 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(prefix_command)]
 pub async fn skip(ctx: Context<'_>) -> Result<(), Error> {
     info!("!SKIP invoked by {:?}", &ctx.author().name,);
-    ctx.data.driver.skip_current_track().await
+    ctx.data().driver.skip_current_track().await
 }
 
 #[poise::command(prefix_command)]
 pub async fn pause(ctx: Context<'_>) -> Result<(), Error> {
     info!("PAUSE invoked by {:?}", &ctx.author().name);
-    ctx.data.driver.pause_current_track().await
+    ctx.data().driver.pause_current_track().await
 }
 
 #[poise::command(prefix_command)]
@@ -53,7 +54,7 @@ pub async fn join(ctx: Context<'_>) -> Result<(), Error> {
     let call = manager
         .join(guild_id, channel_id.unwrap())
         .await
-        .expect("Could not get discord call");
+        .map_err(|e| format!("Could not join the voice channel: {e}"))?;
 
     let driver = ctx.data().driver.clone();
 
@@ -75,19 +76,43 @@ pub async fn leave(ctx: Context<'_>) -> Result<(), Error> {
         .expect("Could not get songbird client")
         .clone();
 
-    ctx.data.driver.leave(manager, guild_id).await
+    ctx.data().driver.leave(manager, guild_id).await
 }
 
 #[poise::command(prefix_command, aliases("p", "queue", "q"))]
 pub async fn play(ctx: Context<'_>, #[rest] argument: Option<String>) -> Result<(), Error> {
     info!("PLAY invoked by {:?}", &ctx.author().name);
 
-    if argument.is_none() {
-        return ctx.data.driver.unpause_current_track().await;
-    }
-    let link = argument.unwrap();
+    let Some(input) = argument else {
+        return ctx.data().driver.unpause_current_track().await;
+    };
 
-    ctx.data.play_input(link).await?;
+    let Some(url) = resolve_input(ctx, input).await? else {
+        return Ok(());
+    };
+
+    ctx.data().play_input(url).await?;
     ctx.msg.react(&ctx.http(), '✅').await?;
     Ok(())
+}
+
+/// Links pass through untouched. Anything else is searched, and the user
+/// picks one of the results. `None` means there is nothing to play.
+async fn resolve_input(ctx: Context<'_>, input: String) -> Result<Option<String>, Error> {
+    if ctx.data().is_link(&input) {
+        return Ok(Some(input));
+    }
+
+    let results = ctx.data().search(&input).await;
+    if results.is_empty() {
+        ctx.msg.channel_id.say(ctx.serenity_context(), "No results found").await?;
+        return Ok(None);
+    }
+
+    let picked = search_menu::pick_result(ctx, &results).await?;
+    if picked.is_none() {
+        ctx.msg.channel_id.say(ctx.serenity_context(), "Selection timed out").await?;
+    }
+
+    Ok(picked)
 }

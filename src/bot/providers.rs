@@ -30,10 +30,14 @@ impl Providers {
         }
     }
 
-    pub async fn search(&self, query: &str) -> Result<Vec<String>, Error> {
+    pub async fn search(
+        &self,
+        http_client: HttpClient,
+        query: &str,
+    ) -> Result<Vec<SearchResult>, Error> {
         match self {
-            Providers::YouTube(p) => p.search(query).await,
-            Providers::SoundCloud(p) => p.search(query).await,
+            Providers::YouTube(p) => p.search(http_client, query).await,
+            Providers::SoundCloud(p) => p.search(http_client, query).await,
         }
     }
 
@@ -49,9 +53,15 @@ pub trait AudioStream {
     fn get_stream(&self, http_client: HttpClient, url: String) -> Input;
 }
 
+pub struct SearchResult {
+    pub title: String,
+    pub url: String,
+}
+
 #[async_trait]
 pub trait Search: Send + Sync {
-    async fn search(&self, query: &str) -> Result<Vec<String>, Error>;
+    async fn search(&self, http_client: HttpClient, query: &str)
+        -> Result<Vec<SearchResult>, Error>;
 }
 
 pub trait Regexp {
